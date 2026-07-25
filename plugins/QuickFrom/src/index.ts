@@ -1,4 +1,6 @@
 import { logger } from "@vendetta";
+import { showToast } from "@vendetta/ui/toasts";
+import { getAssetIDByName } from "@vendetta/ui/assets";
 import { ensureDefaults } from "./lib/search";
 import patchAvatarDoubleTap from "./patches/avatarDoubleTap";
 import patchMessageSheet from "./patches/messageSheet";
@@ -8,10 +10,15 @@ import Settings from "./Settings";
 const unpatches: Array<(() => void) | null | undefined | (() => void)[]> = [];
 
 export const onLoad = () => {
-  ensureDefaults();
+  try {
+    ensureDefaults();
+  } catch (e) {
+    console.error("[QuickFrom] ensureDefaults", e);
+  }
 
   try {
-    unpatches.push(...patchAvatarDoubleTap());
+    const ups = patchAvatarDoubleTap();
+    if (Array.isArray(ups)) unpatches.push(...ups);
   } catch (e) {
     logger?.error?.("[QuickFrom] avatar patch failed", e);
     console.error("[QuickFrom] avatar patch failed", e);
@@ -31,7 +38,15 @@ export const onLoad = () => {
     console.error("[QuickFrom] profile sheet failed", e);
   }
 
+  try {
+    showToast(
+      "QuickFrom 已启动",
+      getAssetIDByName("ic_search") ?? getAssetIDByName("Check"),
+    );
+  } catch {}
+
   logger?.info?.("[QuickFrom] loaded");
+  console.log("[QuickFrom] loaded, patches:", unpatches.length);
 };
 
 export const onUnload = () => {

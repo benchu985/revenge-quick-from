@@ -9,7 +9,6 @@ import esbuild from "rollup-plugin-esbuild";
 const plugins = [
   nodeResolve(),
   commonjs(),
-  // Termux/Android often has no @swc native binding — esbuild alone is enough
   esbuild({
     minify: true,
     target: "es2019",
@@ -17,9 +16,6 @@ const plugins = [
     jsxFactory: "React.createElement",
     jsxFragment: "React.Fragment",
     tsconfig: false,
-    loaders: {
-      ".json": "json",
-    },
   }),
 ];
 
@@ -36,6 +32,7 @@ for (const plug of await readdir("./plugins")) {
       input: `./plugins/${plug}/${manifest.main}`,
       onwarn: () => {},
       plugins,
+      // Vendetta injects these as IIFE globals — must stay external
       external: (id) => id === "react" || id.startsWith("@vendetta"),
     });
 
@@ -43,14 +40,19 @@ for (const plug of await readdir("./plugins")) {
     await bundle.write({
       file: outPath,
       globals(id) {
+        // @vendetta/metro -> vendetta.metro  (same as official plugins)
         if (id.startsWith("@vendetta"))
           return id.substring(1).replace(/\//g, ".");
-        return { react: "window.React" }[id] || null;
+        if (id === "react") return "window.React";
+        return null;
       },
+      // IMPORTANT: anonymous IIFE, NO `name`.
+      // Vendetta/Revenge eval the file and need the *expression result*
+      // `(function(...){...; return exports})(vendetta...)`
+      // `var X=function...` makes eval return undefined → start does nothing.
       format: "iife",
       compact: true,
       exports: "named",
-      name: plug.replace(/[^a-zA-Z0-9]/g, "_"),
     });
     await bundle.close();
 
@@ -62,7 +64,16 @@ for (const plug of await readdir("./plugins")) {
       JSON.stringify(manifest),
     );
 
-    console.log(`Built: ${manifest.name} -> dist/${plug}/ (${toHash.length} bytes)`);
+    const head = toHash.toString("utf8").slice(0, 20);
+    if (!head.startsWith("(function") && !head.startsWith("!function")) {
+      console.warn(
+        `WARN: ${plug} bundle does not start with (function — Revenge may fail to start it. head=${JSON.stringify(head)}`,
+      );
+    }
+
+    console.log(
+      `Built: ${manifest.name} -> dist/${plug}/ (${toHash.length} bytes) head=${JSON.stringify(head)}`,
+    );
   } catch (e) {
     console.error(`Failed to build ${plug}:`, e);
     process.exit(1);
