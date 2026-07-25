@@ -1,1 +1,1 @@
-{"name":"QuickFrom","description":"双击头像 / 长按消息 → 打开 from 搜索结果页（自带列表，不依赖原生搜索跳转）","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search"},"hash":"5e9089b01afb03e273fcc7228de8988f4e7f826035e8ac716f64261e58178329"}
+{"name":"QuickFrom","description":"v1.1 可启动：长按消息搜发言 / 双击头像（自带结果页）","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search"},"hash":"26592bbfe84aacc612efe268014f41906f13a318456a53708931e72f27b8a4f6"}

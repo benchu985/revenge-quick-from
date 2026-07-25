@@ -1,41 +1,53 @@
-import { logger } from "@vendetta";
 import { showToast } from "@vendetta/ui/toasts";
 import { getAssetIDByName } from "@vendetta/ui/assets";
-import { ensureDefaults } from "./lib/search";
-import patchAvatarDoubleTap from "./patches/avatarDoubleTap";
+import { storage } from "@vendetta/plugin";
 import patchMessageSheet from "./patches/messageSheet";
 import patchProfileSheet from "./patches/profileSheet";
+import patchAvatar from "./patches/avatarDoubleTap";
 import Settings from "./Settings";
 
-const unpatches: Array<(() => void) | null | undefined | (() => void)[]> = [];
+const unpatches: Array<(() => void) | null | undefined> = [];
+
+function defaults() {
+  const s = storage as any;
+  if (s.doubleTapAvatar === undefined) s.doubleTapAvatar = true;
+  if (s.messageSheet === undefined) s.messageSheet = true;
+  if (s.profileSheet === undefined) s.profileSheet = true;
+  if (s.preferUserId === undefined) s.preferUserId = true;
+  if (s.includeChannel === undefined) s.includeChannel = false;
+  if (s.doubleTapMs === undefined) s.doubleTapMs = 350;
+  if (s.showToastOnSearch === undefined) s.showToastOnSearch = true;
+}
 
 export const onLoad = () => {
   try {
-    ensureDefaults();
+    defaults();
   } catch (e) {
-    console.error("[QuickFrom] ensureDefaults", e);
+    console.error("[QuickFrom] defaults", e);
+  }
+
+  // message sheet first — most reliable, lowest crash risk
+  try {
+    const u = patchMessageSheet();
+    if (u) unpatches.push(u);
+  } catch (e) {
+    console.error("[QuickFrom] messageSheet", e);
   }
 
   try {
-    const ups = patchAvatarDoubleTap();
-    if (Array.isArray(ups)) unpatches.push(...ups);
+    const u = patchProfileSheet();
+    if (u) unpatches.push(u);
   } catch (e) {
-    logger?.error?.("[QuickFrom] avatar patch failed", e);
-    console.error("[QuickFrom] avatar patch failed", e);
+    console.error("[QuickFrom] profileSheet", e);
   }
 
   try {
-    unpatches.push(patchMessageSheet());
+    const ups = patchAvatar();
+    if (Array.isArray(ups)) {
+      for (const u of ups) if (u) unpatches.push(u);
+    }
   } catch (e) {
-    logger?.error?.("[QuickFrom] message sheet failed", e);
-    console.error("[QuickFrom] message sheet failed", e);
-  }
-
-  try {
-    unpatches.push(patchProfileSheet());
-  } catch (e) {
-    logger?.error?.("[QuickFrom] profile sheet failed", e);
-    console.error("[QuickFrom] profile sheet failed", e);
+    console.error("[QuickFrom] avatar", e);
   }
 
   try {
@@ -43,17 +55,19 @@ export const onLoad = () => {
       "QuickFrom 已启动",
       getAssetIDByName("ic_search") ?? getAssetIDByName("Check"),
     );
-  } catch {}
+  } catch {
+    try {
+      showToast("QuickFrom 已启动");
+    } catch {}
+  }
 
-  logger?.info?.("[QuickFrom] loaded");
-  console.log("[QuickFrom] loaded, patches:", unpatches.length);
+  console.log("[QuickFrom] loaded patches=", unpatches.length);
 };
 
 export const onUnload = () => {
   for (const u of unpatches) {
     try {
-      if (Array.isArray(u)) u.forEach((fn) => fn?.());
-      else u?.();
+      u?.();
     } catch {}
   }
   unpatches.length = 0;

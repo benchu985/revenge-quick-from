@@ -11,10 +11,11 @@ import {
 } from "./lib/api";
 import { getUserId, getUserTag } from "./lib/user";
 
-const { View, Text, FlatList, TouchableOpacity, ActivityIndicator, TextInput } =
-  ReactNative as any;
+function RN() {
+  return ReactNative as any;
+}
 
-function safeFindByProps(...props: string[]) {
+function fp(...props: string[]) {
   try {
     return findByProps(...props);
   } catch {
@@ -25,11 +26,11 @@ function safeFindByProps(...props: string[]) {
 function channelName(id: string): string {
   try {
     const ChannelStore =
-      findByStoreName?.("ChannelStore") ?? safeFindByProps("getChannel");
+      findByStoreName?.("ChannelStore") ?? fp("getChannel");
     const ch = ChannelStore?.getChannel?.(id);
     if (ch?.name) return `#${ch.name}`;
   } catch {}
-  return `#${id.slice(-4)}`;
+  return `#${String(id).slice(-4)}`;
 }
 
 function fmtTime(ts?: string) {
@@ -47,15 +48,22 @@ function fmtTime(ts?: string) {
 }
 
 export default function ResultsPage({ user }: { user: any }) {
+  const {
+    View,
+    Text,
+    FlatList,
+    TouchableOpacity,
+    ActivityIndicator,
+    TextInput,
+  } = RN();
+
   const authorId = getUserId(user);
   const tag = getUserTag(user) || authorId || "?";
-  const queryPreview = (() => {
-    const id = getUserId(user);
-    const tag = getUserTag(user);
-    if (id) return `from:${id}`;
-    if (tag) return `from:${tag}`;
-    return "from:";
-  })();
+  const queryPreview = authorId
+    ? `from:${authorId}`
+    : tag
+      ? `from:${tag}`
+      : "from:";
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -81,14 +89,12 @@ export default function ResultsPage({ user }: { user: any }) {
         setLoading(false);
         return;
       }
-
       try {
         if (append) setLoadingMore(true);
         else {
           setLoading(true);
           setError(null);
         }
-
         const res = await searchAuthorMessages({
           guildId,
           authorId,
@@ -96,14 +102,15 @@ export default function ResultsPage({ user }: { user: any }) {
           offset: nextOffset,
           content: filter.trim() || undefined,
         });
-
         setTotal(res.total);
         setOffset(nextOffset + res.messages.length);
-        setItems((prev) => (append ? [...prev, ...res.messages] : res.messages));
+        setItems((prev) =>
+          append ? prev.concat(res.messages) : res.messages,
+        );
       } catch (e: any) {
-        const msg = e?.body?.message || e?.message || e?.text || String(e);
+        const msg =
+          e?.body?.message || e?.message || e?.text || String(e);
         setError(`搜索失败: ${msg}`);
-        console.error("[QuickFrom] search", e);
       } finally {
         setLoading(false);
         setLoadingMore(false);
@@ -123,17 +130,15 @@ export default function ResultsPage({ user }: { user: any }) {
       try {
         clipboard?.setString?.(link);
       } catch {}
-      showToast(
-        "跳转失败，已复制消息链接",
-        getAssetIDByName("ic_copy_message_link") ??
-          getAssetIDByName("CopyIcon"),
-      );
+      try {
+        showToast(
+          "已复制消息链接",
+          getAssetIDByName("ic_copy_message_link"),
+        );
+      } catch {}
     } else {
       try {
-        const Navigation =
-          safeFindByProps("push", "pushLazy", "pop") ??
-          safeFindByProps("pop");
-        Navigation?.pop?.();
+        fp("push", "pop")?.pop?.();
       } catch {}
     }
   };
@@ -161,13 +166,7 @@ export default function ResultsPage({ user }: { user: any }) {
     ),
     React.createElement(
       View,
-      {
-        style: {
-          flexDirection: "row",
-          marginTop: 8,
-          alignItems: "center",
-        },
-      },
+      { style: { flexDirection: "row", marginTop: 8, alignItems: "center" } },
       React.createElement(
         TouchableOpacity,
         {
@@ -177,7 +176,9 @@ export default function ResultsPage({ user }: { user: any }) {
             paddingVertical: 6,
             borderRadius: 16,
             marginRight: 8,
-            backgroundColor: onlyChannel ? "#5865F2" : "rgba(255,255,255,0.08)",
+            backgroundColor: onlyChannel
+              ? "#5865F2"
+              : "rgba(255,255,255,0.08)",
           },
         },
         React.createElement(
@@ -207,7 +208,7 @@ export default function ResultsPage({ user }: { user: any }) {
     React.createElement(TextInput, {
       value: filter,
       onChangeText: setFilter,
-      placeholder: "再筛内容关键词（可选，回车搜索）",
+      placeholder: "关键词（回车搜索）",
       placeholderTextColor: "#6d6f78",
       onSubmitEditing: () => load(0, false),
       returnKeyType: "search",
@@ -232,14 +233,13 @@ export default function ResultsPage({ user }: { user: any }) {
       React.createElement(
         View,
         {
-          style: { flex: 1, alignItems: "center", justifyContent: "center" },
+          style: {
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+          },
         },
         React.createElement(ActivityIndicator, { size: "large" }),
-        React.createElement(
-          Text,
-          { style: { color: "#b5bac1", marginTop: 12 } },
-          "正在搜索…",
-        ),
       ),
     );
   }
@@ -289,7 +289,11 @@ export default function ResultsPage({ user }: { user: any }) {
       ListEmptyComponent: React.createElement(
         Text,
         {
-          style: { color: "#b5bac1", textAlign: "center", marginTop: 40 },
+          style: {
+            color: "#b5bac1",
+            textAlign: "center",
+            marginTop: 40,
+          },
         },
         "没有搜到消息",
       ),
@@ -301,20 +305,7 @@ export default function ResultsPage({ user }: { user: any }) {
         ? React.createElement(ActivityIndicator, {
             style: { marginVertical: 12 },
           })
-        : items.length < total
-          ? React.createElement(
-              TouchableOpacity,
-              {
-                onPress: () => load(offset, true),
-                style: { padding: 16, alignItems: "center" },
-              },
-              React.createElement(
-                Text,
-                { style: { color: "#00a8fc" } },
-                "加载更多",
-              ),
-            )
-          : null,
+        : null,
       renderItem: ({ item }: { item: SearchHit }) =>
         React.createElement(
           TouchableOpacity,
@@ -329,13 +320,15 @@ export default function ResultsPage({ user }: { user: any }) {
           },
           React.createElement(
             Text,
-            { style: { color: "#b5bac1", fontSize: 11, marginBottom: 4 } },
+            {
+              style: { color: "#b5bac1", fontSize: 11, marginBottom: 4 },
+            },
             `${channelName(item.channel_id)} · ${fmtTime(item.timestamp)}`,
           ),
           React.createElement(
             Text,
             { style: { color: "#dbdee1", fontSize: 14 }, numberOfLines: 4 },
-            item.content || "(无文字 / 贴纸或附件)",
+            item.content || "(无文字)",
           ),
         ),
     }),

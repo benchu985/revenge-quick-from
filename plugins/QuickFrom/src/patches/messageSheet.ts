@@ -3,13 +3,10 @@ import { findByProps } from "@vendetta/metro";
 import { findInReactTree } from "@vendetta/utils";
 import { React } from "@vendetta/metro/common";
 import { getAssetIDByName } from "@vendetta/ui/assets";
-import {
-  ensureDefaults,
-  openFromSearch,
-  settings,
-} from "../lib/search";
+import { storage } from "@vendetta/plugin";
+import { openFromSearch } from "../lib/openResults";
 
-function safeFindByProps(...props: string[]) {
+function fp(...props: string[]) {
   try {
     return findByProps(...props);
   } catch {
@@ -17,105 +14,95 @@ function safeFindByProps(...props: string[]) {
   }
 }
 
-/**
- * Add "搜索此人发言 (from:)" to MessageLongPressActionSheet.
- */
 export default function patchMessageSheet(): (() => void) | null {
-  const ActionSheet = safeFindByProps("openLazy", "hideActionSheet");
-  if (!ActionSheet) return null;
+  const ActionSheet = fp("openLazy", "hideActionSheet");
+  if (!ActionSheet) {
+    console.log("[QuickFrom] no ActionSheet");
+    return null;
+  }
 
-  const rowMod = safeFindByProps("ActionSheetRow");
+  const rowMod = fp("ActionSheetRow");
   const ActionSheetRow = rowMod?.ActionSheetRow;
   const SearchIcon =
     getAssetIDByName("ic_search") ??
     getAssetIDByName("SearchIcon") ??
-    getAssetIDByName("ic_search_24px") ??
-    getAssetIDByName("MagnifyingGlassIcon");
+    getAssetIDByName("ic_search_24px");
 
   return before("openLazy", ActionSheet, ([comp, key, msg]) => {
-    ensureDefaults();
-    if (!settings.messageSheet) return;
-    if (key !== "MessageLongPressActionSheet") return;
+    try {
+      if ((storage as any).messageSheet === false) return;
+      if (key !== "MessageLongPressActionSheet") return;
 
-    const message = msg?.message ?? msg;
-    const author = message?.author;
-    if (!author) return;
+      const message = msg?.message ?? msg;
+      const author = message?.author;
+      if (!author || !comp?.then) return;
 
-    comp.then((instance: any) => {
-      const unpatch = after("default", instance, (_, component) => {
-        React.useEffect(() => () => unpatch(), []);
+      comp.then((instance: any) => {
+        const unpatch = after("default", instance, (_, component) => {
+          try {
+            React.useEffect(() => () => {
+              try {
+                unpatch();
+              } catch {}
+            }, []);
 
-        try {
-          let buttons = findInReactTree(
-            component,
-            (c: any) =>
-              c?.some?.(
-                (child: any) =>
-                  child?.type?.name === "ActionSheetRow" ||
-                  child?.props?.label ||
-                  child?.props?.iconSource,
-              ),
-          );
+            if (!ActionSheetRow) return;
 
-          if (!buttons) {
-            buttons = findInReactTree(
+            let buttons = findInReactTree(
               component,
-              (x: any) => x?.[0]?.type?.name === "ButtonRow",
+              (c: any) =>
+                c?.some?.(
+                  (child: any) =>
+                    child?.type?.name === "ActionSheetRow" ||
+                    child?.props?.label,
+                ),
             );
-          }
 
-          if (!buttons) {
-            const groups = findInReactTree(
-              component,
-              (c: any) => c?.[0]?.type?.name === "ActionSheetRowGroup",
-            );
-            if (groups?.length) {
+            if (!buttons) {
               buttons = findInReactTree(
-                groups[0],
-                (c: any) =>
-                  c?.some?.(
-                    (child: any) =>
-                      child?.type?.name === "ActionSheetRow" ||
-                      child?.props?.label,
-                  ),
+                component,
+                (x: any) => x?.[0]?.type?.name === "ButtonRow",
               );
             }
+
+            if (!Array.isArray(buttons)) return;
+
+            if (
+              buttons.some(
+                (b: any) =>
+                  b?.key === "quickfrom-search" ||
+                  b?.props?.label === "搜索此人发言",
+              )
+            ) {
+              return;
+            }
+
+            const icon = SearchIcon
+              ? React.createElement(ActionSheetRow.Icon, {
+                  source: SearchIcon,
+                })
+              : undefined;
+
+            buttons.unshift(
+              React.createElement(ActionSheetRow, {
+                key: "quickfrom-search",
+                label: "搜索此人发言",
+                icon,
+                onPress: () => {
+                  try {
+                    ActionSheet.hideActionSheet?.();
+                  } catch {}
+                  openFromSearch(author);
+                },
+              }),
+            );
+          } catch (e) {
+            console.error("[QuickFrom] message sheet render", e);
           }
-
-          if (!buttons?.length && !Array.isArray(buttons)) return;
-
-          const already = buttons.some(
-            (b: any) =>
-              b?.props?.label === "搜索此人发言" ||
-              b?.props?.label === "Search From User" ||
-              b?.key === "quickfrom-search",
-          );
-          if (already) return;
-          if (!ActionSheetRow) return;
-
-          const onPress = () => {
-            ActionSheet.hideActionSheet?.();
-            openFromSearch(author);
-          };
-
-          const icon = SearchIcon
-            ? React.createElement(ActionSheetRow.Icon, { source: SearchIcon })
-            : undefined;
-
-          const row = React.createElement(ActionSheetRow, {
-            key: "quickfrom-search",
-            label: "搜索此人发言",
-            icon,
-            onPress,
-          });
-
-          if (Array.isArray(buttons)) {
-            buttons.unshift(row);
-          }
-        } catch (e) {
-          console.error("[QuickFrom] message sheet", e);
-        }
+        });
       });
-    });
+    } catch (e) {
+      console.error("[QuickFrom] message sheet", e);
+    }
   });
 }

@@ -7,9 +7,7 @@ export function getUserTag(user: any): string {
     user.user?.globalName ??
     "";
   const disc = user.discriminator ?? user.user?.discriminator;
-  if (disc && disc !== "0" && disc !== "0000") {
-    return `${username}#${disc}`;
-  }
+  if (disc && disc !== "0" && disc !== "0000") return `${username}#${disc}`;
   return username;
 }
 

@@ -3,13 +3,10 @@ import { findByProps } from "@vendetta/metro";
 import { findInReactTree } from "@vendetta/utils";
 import { React } from "@vendetta/metro/common";
 import { getAssetIDByName } from "@vendetta/ui/assets";
-import {
-  ensureDefaults,
-  openFromSearch,
-  settings,
-} from "../lib/search";
+import { storage } from "@vendetta/plugin";
+import { openFromSearch } from "../lib/openResults";
 
-function safeFindByProps(...props: string[]) {
+function fp(...props: string[]) {
   try {
     return findByProps(...props);
   } catch {
@@ -17,87 +14,91 @@ function safeFindByProps(...props: string[]) {
   }
 }
 
-/**
- * Add search action on user profile long-press / overflow sheets.
- */
 export default function patchProfileSheet(): (() => void) | null {
-  const ActionSheet = safeFindByProps("openLazy", "hideActionSheet");
+  const ActionSheet = fp("openLazy", "hideActionSheet");
   if (!ActionSheet) return null;
 
-  const rowMod = safeFindByProps("ActionSheetRow");
+  const rowMod = fp("ActionSheetRow");
   const ActionSheetRow = rowMod?.ActionSheetRow;
   const SearchIcon =
     getAssetIDByName("ic_search") ??
     getAssetIDByName("SearchIcon") ??
     getAssetIDByName("ic_search_24px");
 
-  const PROFILE_KEYS = [
-    "UserProfileActionSheet",
-    "GuildProfileActionSheet",
-    "ProfileActionSheet",
-    "UserSettingsActionSheet",
-  ];
-
   return before("openLazy", ActionSheet, ([comp, key, data]) => {
-    ensureDefaults();
-    if (!settings.profileSheet) return;
+    try {
+      if ((storage as any).profileSheet === false) return;
+      const keyStr = typeof key === "string" ? key : "";
+      const user =
+        data?.user ??
+        data?.guildMember?.user ??
+        data?.member?.user ??
+        (data?.username ? data : null);
 
-    const keyStr = typeof key === "string" ? key : "";
-    const isProfile =
-      PROFILE_KEYS.some((k) => keyStr.includes(k)) ||
-      keyStr.toLowerCase().includes("profile");
+      const isProfile =
+        /profile/i.test(keyStr) ||
+        !!user;
 
-    const user =
-      data?.user ??
-      data?.guildMember?.user ??
-      data?.member?.user ??
-      (data?.username ? data : null);
+      // only if key looks like profile OR we clearly have user + profile-ish key
+      if (!user) return;
+      if (!isProfile && !keyStr.includes("User")) return;
+      if (!comp?.then || !ActionSheetRow) return;
 
-    if (!isProfile && !user) return;
-    if (!user) return;
+      comp.then((instance: any) => {
+        const unpatch = after("default", instance, (_, component) => {
+          try {
+            React.useEffect(() => () => {
+              try {
+                unpatch();
+              } catch {}
+            }, []);
 
-    comp.then((instance: any) => {
-      const unpatch = after("default", instance, (_, component) => {
-        React.useEffect(() => () => unpatch(), []);
-        try {
-          const buttons = findInReactTree(
-            component,
-            (c: any) =>
-              c?.some?.(
-                (child: any) =>
-                  child?.type?.name === "ActionSheetRow" ||
-                  child?.props?.label,
-              ),
-          );
-          if (!buttons?.length) return;
+            const buttons = findInReactTree(
+              component,
+              (c: any) =>
+                c?.some?.(
+                  (child: any) =>
+                    child?.type?.name === "ActionSheetRow" ||
+                    child?.props?.label,
+                ),
+            );
+            if (!Array.isArray(buttons)) return;
+            if (
+              buttons.some(
+                (b: any) =>
+                  b?.key === "quickfrom-profile-search" ||
+                  b?.props?.label === "搜索此人发言",
+              )
+            ) {
+              return;
+            }
 
-          const already = buttons.some(
-            (b: any) =>
-              b?.props?.label === "搜索此人发言" ||
-              b?.key === "quickfrom-profile-search",
-          );
-          if (already) return;
-          if (!ActionSheetRow) return;
+            const icon = SearchIcon
+              ? React.createElement(ActionSheetRow.Icon, {
+                  source: SearchIcon,
+                })
+              : undefined;
 
-          const icon = SearchIcon
-            ? React.createElement(ActionSheetRow.Icon, { source: SearchIcon })
-            : undefined;
-
-          buttons.unshift(
-            React.createElement(ActionSheetRow, {
-              key: "quickfrom-profile-search",
-              label: "搜索此人发言",
-              icon,
-              onPress: () => {
-                ActionSheet.hideActionSheet?.();
-                openFromSearch(user);
-              },
-            }),
-          );
-        } catch (e) {
-          console.error("[QuickFrom] profile sheet", e);
-        }
+            buttons.unshift(
+              React.createElement(ActionSheetRow, {
+                key: "quickfrom-profile-search",
+                label: "搜索此人发言",
+                icon,
+                onPress: () => {
+                  try {
+                    ActionSheet.hideActionSheet?.();
+                  } catch {}
+                  openFromSearch(user);
+                },
+              }),
+            );
+          } catch (e) {
+            console.error("[QuickFrom] profile sheet render", e);
+          }
+        });
       });
-    });
+    } catch (e) {
+      console.error("[QuickFrom] profile sheet", e);
+    }
   });
 }
