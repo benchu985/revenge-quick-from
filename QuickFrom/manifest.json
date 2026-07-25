@@ -1,1 +1,1 @@
-{"name":"QuickFrom","description":"v1.6 类原生搜索页 · 精确时间/头像/表情/分页（已修 Search 崩溃）","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"66f2a069237f2415e939f7f5c144fc6b5c53deb17969503d2015dc2d95cf2f78"}
+{"name":"QuickFrom","description":"v1.7 相对时间 · 分钟前/小时分钟/头像/表情/分页","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"6fbfaf2a23c9c1244ad0896cf7632936c9ac20e3db0dc7bd481e7fb11257d0d7"}
