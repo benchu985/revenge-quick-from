@@ -1,1 +1,1 @@
-{"name":"AntiRecall","description":"本地保留已接收消息的撤回与编辑历史","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"33443646e5c487df3cf5884a5c6d7f55074dcf4127610bd79a3d2806743d94ed"}
+{"name":"AntiRecall","description":"v2 仅归档编辑与撤回消息 · 批量本地保存","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"19e0eae064a1e46ecf948bce1bb0ab489c8fc1cfaf99aa7c60159f2a0c9b901a"}
