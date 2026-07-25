@@ -1,1 +1,1 @@
-{"name":"AntiRecall","description":"v2.1 撤回消息保留在频道内 · 编辑/撤回批量归档","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"03d871eb5a0f196cc7fc4ff297a3c554db63e0e654db9922010f5ff5d86bdded"}
+{"name":"AntiRecall","description":"v2.2 撤回红框、编辑蓝框 · 编辑/撤回批量归档","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"2f4442ee0e45de0c606cd2cdd47f0d7fee93f5130e90ef2339a45cedf904158b"}

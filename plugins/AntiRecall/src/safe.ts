@@ -24,6 +24,7 @@ type ArchiveItem = {
 };
 
 var unpatch: (() => void) | null = null;
+var unpatchRows: (() => void) | null = null;
 var pending: Record<string, ArchiveItem> = {};
 var flushTimer: any = null;
 var STORE_KEY = "antiRecallArchiveV2";
@@ -65,8 +66,12 @@ function makeItem(message: any, channelId: string, now: number): ArchiveItem {
   };
 }
 
-function enqueue(item: ArchiveItem) {
+function enqueue(item: ArchiveItem, immediately?: boolean) {
   pending[key(item.channelId, item.id)] = item;
+  if (immediately) {
+    flush();
+    return;
+  }
   if (flushTimer) return;
   flushTimer = setTimeout(flush, 2000);
 }
@@ -110,6 +115,10 @@ function handleUpdate(event: any) {
   item.latest = text(changed);
   item.updatedAt = now;
   enqueue(item);
+
+  // Keep a lightweight marker for the row renderer. The server's edited text
+  // remains intact; the original is available in the persisted archive.
+  event.message = Object.assign({}, changed, { antiRecallEdited: true });
 }
 
 function handleDelete(event: any) {
@@ -125,7 +134,7 @@ function handleDelete(event: any) {
   item.deleted = true;
   item.deletedAt = now;
   item.updatedAt = now;
-  enqueue(item);
+  enqueue(item, true);
 
   // Preserve the cached message in the active channel. Discord receives an
   // update instead of the delete action, while the original snapshot remains
@@ -133,7 +142,9 @@ function handleDelete(event: any) {
   event.message = Object.assign({}, old, {
     channel_id: old.channel_id || channelId,
     guild_id: old.guild_id || event.guildId || event.guild_id,
-    content: "[已撤回]\n" + (text(old) || "(无文字内容)"),
+    content: text(old).indexOf("[已撤回]\n") === 0
+      ? text(old)
+      : "[已撤回]\n" + (text(old) || "(无文字内容)"),
     was_deleted: true,
     edited_timestamp: "invalid_timestamp",
   });
@@ -141,6 +152,38 @@ function handleDelete(event: any) {
   event.channelId = old.channel_id || channelId;
   event.optimistic = false;
   event.sendMessageOptions = {};
+}
+
+function patchRowColors() {
+  var controller: any = findByProps("updateRows", "getConstants") || findByProps("updateRows");
+  if (!controller || !controller.updateRows) return null;
+  return before("updateRows", controller, function (args: any[]) {
+    try {
+      var value = args[1];
+      var serialized = typeof value === "string";
+      var rows: any = serialized ? JSON.parse(value) : value;
+      if (!Array.isArray(rows)) return;
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var message = row && row.message;
+        if (!message) continue;
+        if (message.was_deleted) {
+          row.backgroundHighlight = {
+            backgroundColor: ReactNative.processColor("#4B1F25"),
+            gutterColor: ReactNative.processColor("#F23F43"),
+          };
+        } else if (message.antiRecallEdited) {
+          row.backgroundHighlight = {
+            backgroundColor: ReactNative.processColor("#1E3656"),
+            gutterColor: ReactNative.processColor("#5865F2"),
+          };
+        }
+      }
+      args[1] = serialized ? JSON.stringify(rows) : rows;
+    } catch (e) {
+      console.error("[AntiRecall] row color error", e);
+    }
+  });
 }
 
 function ArchiveSettings() {
@@ -189,13 +232,16 @@ export function onLoad() {
       console.error("[AntiRecall] archive event error", e);
     }
   });
-  try { showToast("AntiRecall v2.1 已启动：撤回消息保留在频道内"); } catch (e) {}
+  unpatchRows = patchRowColors();
+  try { showToast("AntiRecall v2.2 已启动：撤回红框，编辑蓝框"); } catch (e) {}
 }
 
 export function onUnload() {
   flush();
   try { if (unpatch) unpatch(); } catch (e) {}
+  try { if (unpatchRows) unpatchRows(); } catch (e) {}
   unpatch = null;
+  unpatchRows = null;
 }
 
 export const settings = ArchiveSettings;
