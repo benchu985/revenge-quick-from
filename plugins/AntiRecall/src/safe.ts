@@ -17,6 +17,7 @@ type ArchiveItem = {
   author: string;
   createdAt?: string;
   latest: string;
+  snapshot: any;
   deleted?: boolean;
   deletedAt?: number;
   revisions: Revision[];
@@ -48,6 +49,30 @@ function author(message: any): string {
   return (user && (user.global_name || user.globalName || user.username)) || "未知用户";
 }
 
+function snapshot(message: any) {
+  return {
+    id: message.id,
+    channel_id: message.channel_id || message.channelId,
+    guild_id: message.guild_id || message.guildId,
+    author: message.author,
+    timestamp: message.timestamp,
+    content: text(message),
+    attachments: message.attachments || [],
+    embeds: message.embeds || [],
+    sticker_items: message.sticker_items || [],
+    mentions: message.mentions || [],
+    mention_roles: message.mention_roles || [],
+    flags: message.flags || 0,
+  };
+}
+
+function highlight(background: string, gutter: string) {
+  return {
+    backgroundColor: ReactNative.processColor(background),
+    gutterColor: ReactNative.processColor(gutter),
+  };
+}
+
 function append(item: ArchiveItem, content: string, kind: string, at: number) {
   var last = item.revisions[item.revisions.length - 1];
   if (!last || last.content !== content) item.revisions.push({ at: at, kind: kind, content: content });
@@ -61,6 +86,7 @@ function makeItem(message: any, channelId: string, now: number): ArchiveItem {
     author: author(message),
     createdAt: message.timestamp,
     latest: text(message),
+    snapshot: snapshot(message),
     revisions: [{ at: now, kind: "原始内容", content: text(message) }],
     updatedAt: now,
   };
@@ -98,7 +124,9 @@ function cachedMessage(channelId: any, messageId: any): any {
 function previous(channelId: string, message: any, now: number): ArchiveItem {
   var id = String(message.id);
   var item = pending[key(channelId, id)] || archive()[key(channelId, id)];
-  return item ? Object.assign({}, item, { revisions: (item.revisions || []).slice() }) : makeItem(message, channelId, now);
+  return item
+    ? Object.assign({}, item, { revisions: (item.revisions || []).slice(), snapshot: item.snapshot || snapshot(message) })
+    : makeItem(message, channelId, now);
 }
 
 function handleUpdate(event: any) {
@@ -113,12 +141,16 @@ function handleUpdate(event: any) {
   append(item, text(old), "编辑前", now);
   append(item, text(changed), "编辑后", now);
   item.latest = text(changed);
+  item.snapshot = snapshot(changed);
   item.updatedAt = now;
-  enqueue(item);
+  enqueue(item, true);
 
   // Keep a lightweight marker for the row renderer. The server's edited text
   // remains intact; the original is available in the persisted archive.
-  event.message = Object.assign({}, changed, { antiRecallEdited: true });
+  event.message = Object.assign({}, changed, {
+    antiRecallEdited: true,
+    backgroundHighlight: highlight("#1E3656", "#5865F2"),
+  });
 }
 
 function handleDelete(event: any) {
@@ -131,6 +163,7 @@ function handleDelete(event: any) {
   var item = previous(String(channelId), old, now);
   append(item, text(old), "撤回前", now);
   item.latest = text(old);
+  item.snapshot = snapshot(old);
   item.deleted = true;
   item.deletedAt = now;
   item.updatedAt = now;
@@ -147,11 +180,43 @@ function handleDelete(event: any) {
       : "[已撤回]\n" + (text(old) || "(无文字内容)"),
     was_deleted: true,
     edited_timestamp: "invalid_timestamp",
+    backgroundHighlight: highlight("#4B1F25", "#F23F43"),
   });
   event.type = "MESSAGE_UPDATE";
   event.channelId = old.channel_id || channelId;
   event.optimistic = false;
   event.sendMessageOptions = {};
+}
+
+function restoreFromArchive(event: any) {
+  var channelId = String(event.channelId || event.channel_id || "");
+  var payload = event.messages;
+  if (!Array.isArray(payload)) return;
+  if (!channelId && payload[0]) channelId = String(payload[0].channel_id || payload[0].channelId || "");
+  if (!channelId) return;
+  var stored = archive();
+  var keys = Object.keys(stored);
+  for (var i = 0; i < keys.length; i++) {
+    var item = stored[keys[i]];
+    if (!item || !item.snapshot) continue;
+    var itemChannel = String(item.channelId || item.snapshot.channel_id || "");
+    if (channelId && itemChannel !== channelId) continue;
+    var found: any = null;
+    for (var j = 0; j < payload.length; j++) if (payload[j] && String(payload[j].id) === String(item.id)) { found = payload[j]; break; }
+    if (item.deleted) {
+      if (!found) {
+        payload.push(Object.assign({}, item.snapshot, {
+          content: text(item.snapshot).indexOf("[已撤回]\n") === 0 ? text(item.snapshot) : "[已撤回]\n" + (text(item.snapshot) || "(无文字内容)"),
+          was_deleted: true,
+          edited_timestamp: "invalid_timestamp",
+          backgroundHighlight: highlight("#4B1F25", "#F23F43"),
+        }));
+      }
+    } else if (found && item.revisions && item.revisions.length > 1) {
+      found.antiRecallEdited = true;
+      found.backgroundHighlight = highlight("#1E3656", "#5865F2");
+    }
+  }
 }
 
 function patchRowColors() {
@@ -168,15 +233,11 @@ function patchRowColors() {
         var message = row && row.message;
         if (!message) continue;
         if (message.was_deleted) {
-          row.backgroundHighlight = {
-            backgroundColor: ReactNative.processColor("#4B1F25"),
-            gutterColor: ReactNative.processColor("#F23F43"),
-          };
+          row.backgroundHighlight = highlight("#4B1F25", "#F23F43");
+          message.backgroundHighlight = row.backgroundHighlight;
         } else if (message.antiRecallEdited) {
-          row.backgroundHighlight = {
-            backgroundColor: ReactNative.processColor("#1E3656"),
-            gutterColor: ReactNative.processColor("#5865F2"),
-          };
+          row.backgroundHighlight = highlight("#1E3656", "#5865F2");
+          message.backgroundHighlight = row.backgroundHighlight;
         }
       }
       args[1] = serialized ? JSON.stringify(rows) : rows;
@@ -226,6 +287,7 @@ export function onLoad() {
     try {
       var event = args[0];
       if (!event || event.otherPluginBypass) return;
+      if (String(event.type).indexOf("LOAD_MESSAGES") >= 0) restoreFromArchive(event);
       if (event.type === "MESSAGE_UPDATE") handleUpdate(event);
       if (event.type === "MESSAGE_DELETE") handleDelete(event);
     } catch (e) {
@@ -233,7 +295,7 @@ export function onLoad() {
     }
   });
   unpatchRows = patchRowColors();
-  try { showToast("AntiRecall v2.2 已启动：撤回红框，编辑蓝框"); } catch (e) {}
+  try { showToast("AntiRecall v2.3 已启动：撤回重载回填、红框、编辑蓝框"); } catch (e) {}
 }
 
 export function onUnload() {
