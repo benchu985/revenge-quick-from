@@ -1,1 +1,1 @@
-{"name":"QuickFrom","description":"v1.4.1 醒目时间 · 头像/表情/分页","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"2f67bffd6e1de279078e3954a07653c381aa4758f19894ad4f7f6f3e4b3f8f26"}
+{"name":"QuickFrom","description":"v1.5 优先打开 Discord 原生搜索 (from:) · 失败才用自建页","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"fdaef6ecd2ba08b944f70ac10ec888931f6c0116f49e1ffea5a349d13ce9d48e"}

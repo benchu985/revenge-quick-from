@@ -1,6 +1,6 @@
 {
   "name": "QuickFrom",
-  "description": "v1.4.1 醒目时间 · 头像/表情/分页",
+  "description": "v1.5 优先打开 Discord 原生搜索 (from:) · 失败才用自建页",
   "authors": [
     {
       "name": "benchu985",
