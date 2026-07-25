@@ -1,8 +1,11 @@
-import { findByProps, findByStoreName } from "@vendetta/metro";
-import { FluxDispatcher, ReactNative, clipboard } from "@vendetta/metro/common";
+import { findByProps, findByName } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { storage } from "@vendetta/plugin";
+import ResultsPage from "../ResultsPage";
+import { getUserId, getUserTag } from "./user";
+export { getUserId, getUserTag };
 
 export type QuickFromSettings = {
   doubleTapAvatar: boolean;
@@ -20,7 +23,7 @@ export function ensureDefaults() {
   if (settings.doubleTapAvatar === undefined) settings.doubleTapAvatar = true;
   if (settings.messageSheet === undefined) settings.messageSheet = true;
   if (settings.profileSheet === undefined) settings.profileSheet = true;
-  if (settings.preferUserId === undefined) settings.preferUserId = false;
+  if (settings.preferUserId === undefined) settings.preferUserId = true; // id more reliable
   if (settings.includeChannel === undefined) settings.includeChannel = false;
   if (settings.doubleTapMs === undefined) settings.doubleTapMs = 350;
   if (settings.showToastOnSearch === undefined) settings.showToastOnSearch = true;
@@ -34,32 +37,12 @@ function safeFindByProps(...props: string[]) {
   }
 }
 
-function safeFindByStore(name: string) {
+function safeFindByName(name: string, def = false) {
   try {
-    return findByStoreName?.(name) ?? null;
+    return findByName(name, def);
   } catch {
     return null;
   }
-}
-
-export function getUserTag(user: any): string {
-  if (!user) return "";
-  const username = user.username ?? user.user?.username ?? "";
-  const disc = user.discriminator ?? user.user?.discriminator;
-  if (disc && disc !== "0" && disc !== "0000") {
-    return `${username}#${disc}`;
-  }
-  return username;
-}
-
-export function getUserId(user: any): string | null {
-  return (
-    user?.id ??
-    user?.userId ??
-    user?.user?.id ??
-    user?.author?.id ??
-    null
-  );
 }
 
 export function buildFromQuery(user: any): string {
@@ -67,50 +50,20 @@ export function buildFromQuery(user: any): string {
   const id = getUserId(user);
   const tag = getUserTag(user);
 
-  let fromPart: string;
-  if (settings.preferUserId && id) {
-    fromPart = `from:${id}`;
-  } else if (tag) {
+  if (settings.preferUserId && id) return `from:${id}`;
+  if (tag) {
     const needsQuote = /[\s:]/.test(tag);
-    fromPart = needsQuote ? `from:"${tag}"` : `from:${tag}`;
-  } else if (id) {
-    fromPart = `from:${id}`;
-  } else {
-    fromPart = "from:";
+    return needsQuote ? `from:"${tag}"` : `from:${tag}`;
   }
-
-  if (!settings.includeChannel) return fromPart;
-
-  try {
-    const SelectedChannelStore =
-      safeFindByStore("SelectedChannelStore") ??
-      safeFindByProps("getChannelId", "getLastSelectedChannelId");
-    const channelId =
-      SelectedChannelStore?.getChannelId?.() ??
-      SelectedChannelStore?.getLastSelectedChannelId?.();
-    if (channelId) return `${fromPart} in:${channelId}`;
-  } catch {}
-
-  return fromPart;
+  if (id) return `from:${id}`;
+  return "from:";
 }
 
-function copyText(text: string) {
-  try {
-    clipboard?.setString?.(text);
-    return;
-  } catch {}
-  try {
-    ReactNative?.Clipboard?.setString?.(text);
-  } catch {}
-}
-
-/**
- * Open Discord search with from: query. Multi-fallback for module renames.
- */
+/** Open our own results page (does NOT rely on native search UI). */
 export function openFromSearch(user: any): boolean {
   ensureDefaults();
-  const query = buildFromQuery(user);
-  if (!query || query === "from:") {
+  const id = getUserId(user);
+  if (!id && !getUserTag(user)) {
     showToast(
       "QuickFrom: 拿不到用户信息",
       getAssetIDByName("ic_close_circle") ?? getAssetIDByName("Close"),
@@ -118,104 +71,69 @@ export function openFromSearch(user: any): boolean {
     return false;
   }
 
-  const tried: string[] = [];
-
-  const searchUi =
-    safeFindByProps("openSearch") ??
-    safeFindByProps("openSearch", "dismissSearch") ??
-    safeFindByProps("openSearch", "closeSearch");
-
-  if (searchUi?.openSearch) {
-    tried.push("openSearch");
-    for (const arg of [
-      { query },
-      query,
-      { searchQuery: query, queryString: query },
-    ] as any[]) {
-      try {
-        searchUi.openSearch(arg);
-        notify(query);
-        return true;
-      } catch {}
-    }
-  }
-
-  const searchActions =
-    safeFindByProps("search", "setQuery") ??
-    safeFindByProps("setSearchQuery") ??
-    safeFindByProps("updateSearchQuery") ??
-    safeFindByProps("setQueryString");
-
-  if (searchActions) {
-    tried.push("searchActions");
-    try {
-      searchActions.setSearchQuery?.(query);
-      searchActions.updateSearchQuery?.(query);
-      searchActions.setQueryString?.(query);
-      searchActions.setQuery?.(query);
-      searchActions.search?.(query);
-      searchUi?.openSearch?.();
-      notify(query);
-      return true;
-    } catch {}
-  }
-
-  const dispatcher = FluxDispatcher ?? safeFindByProps("dispatch", "subscribe");
-  if (dispatcher?.dispatch) {
-    tried.push("FluxDispatcher");
-    for (const p of [
-      { type: "SEARCH_SET_QUERY", query },
-      { type: "SEARCH_QUERY_UPDATED", query },
-      { type: "SEARCH_START", query },
-      { type: "SEARCH_MODAL_OPEN", query },
-      { type: "LAYER_PUSH", layer: "SEARCH", query },
-    ]) {
-      try {
-        dispatcher.dispatch(p);
-      } catch {}
-    }
-    try {
-      searchUi?.openSearch?.({ query });
-      notify(query);
-      return true;
-    } catch {}
-  }
-
   const Navigation =
     safeFindByProps("push", "pushLazy", "pop") ??
-    safeFindByProps("push", "back");
-  if (Navigation?.push) {
-    tried.push("Navigation");
-    try {
-      Navigation.push("Search", { query });
-      notify(query);
-      return true;
-    } catch {}
-    try {
-      Navigation.push("GuildSearch", { queryString: query });
-      notify(query);
-      return true;
-    } catch {}
+    safeFindByProps("push", "pop");
+  const Navigator =
+    safeFindByName("Navigator") ??
+    safeFindByProps("Navigator")?.Navigator;
+  const modalCloseButton =
+    safeFindByProps("getRenderCloseButton")?.getRenderCloseButton ??
+    safeFindByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+
+  if (!Navigation?.push || !Navigator) {
+    showToast(
+      "QuickFrom: 找不到导航模块",
+      getAssetIDByName("ic_close_circle") ?? getAssetIDByName("Close"),
+    );
+    console.error("[QuickFrom] Navigation/Navigator missing", {
+      Navigation: !!Navigation,
+      Navigator: !!Navigator,
+    });
+    return false;
   }
 
-  // clipboard fallback
-  copyText(query);
-  showToast(
-    `已复制 ${query}，打开搜索粘贴即可`,
-    getAssetIDByName("ic_copy_message_link") ??
-      getAssetIDByName("CopyIcon") ??
-      getAssetIDByName("ic_search"),
-  );
-  console.log("[QuickFrom] fallback clipboard. tried:", tried.join(","), "query:", query);
-  return true;
-}
+  const title = `from:${getUserTag(user) || id}`;
 
-function notify(query: string) {
-  if (!settings.showToastOnSearch) return;
-  showToast(
-    `搜索 ${query}`,
-    getAssetIDByName("ic_search") ?? getAssetIDByName("SearchIcon"),
-  );
+  const screen = () =>
+    React.createElement(Navigator, {
+      initialRouteName: "QuickFromResults",
+      goBackOnBackPress: true,
+      screens: {
+        QuickFromResults: {
+          title,
+          headerLeft: modalCloseButton
+            ? modalCloseButton(() => Navigation.pop())
+            : undefined,
+          render: () => React.createElement(ResultsPage, { user }),
+        },
+      },
+    });
+
+  try {
+    Navigation.push(screen);
+    if (settings.showToastOnSearch) {
+      showToast(
+        `搜索 ${title}`,
+        getAssetIDByName("ic_search") ?? getAssetIDByName("SearchIcon"),
+      );
+    }
+    return true;
+  } catch (e) {
+    console.error("[QuickFrom] Navigation.push failed", e);
+    // some builds want component class not function
+    try {
+      Navigation.push(screen as any, {});
+      return true;
+    } catch (e2) {
+      console.error("[QuickFrom] push retry failed", e2);
+      showToast(
+        "打开结果页失败: " + String(e2)?.slice(0, 80),
+        getAssetIDByName("ic_close_circle"),
+      );
+      return false;
+    }
+  }
 }
 
 export function isDoubleTap(key: string): boolean {
