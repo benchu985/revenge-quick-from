@@ -1,1 +1,1 @@
-{"name":"AntiRecall","description":"v2.3 撤回重载回填、红框、编辑蓝框 · 本地归档","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"af94e9c7274a0a6cf94ceb0d1a852f3c36f8b302d67f23a0489b61a02dfb89d8"}
+{"name":"AntiRecall","description":"v3 临时防撤回/编辑 · 撤回红框、编辑蓝框（重启清空）","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"7f852c4c5ab6fcda7855fc3c4b71e407a648c0b8e567a6adec0461934d4bf85f"}

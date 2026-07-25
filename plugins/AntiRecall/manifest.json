@@ -1,7 +1,7 @@
 {
   "name": "AntiRecall",
-  "description": "v2.3 撤回重载回填、红框、编辑蓝框 · 本地归档",
+  "description": "v3 临时防撤回/编辑 · 撤回红框、编辑蓝框（重启清空）",
   "authors": [{ "name": "benchu985", "id": "0" }],
-  "main": "src/safe.ts",
+  "main": "src/ephemeral.ts",
   "vendetta": { "icon": "ic_message_delete" }
 }
