@@ -1,5 +1,5 @@
 /**
- * QuickFrom v1.4
+ * QuickFrom v1.4.1
  * 长按消息 → 搜索此人发言
  * 结果页：头像 / 自定义表情 / 时间 / 图片 / 分页跳页 / 稳定按压反馈
  *
@@ -31,6 +31,9 @@ var C = {
   danger: "#f23f43",
   chip: "#404249",
   avatarRing: "#5865f2",
+  time: "#f0b232",
+  timeBg: "rgba(240, 178, 50, 0.16)",
+  timeBorder: "rgba(240, 178, 50, 0.45)",
 };
 
 function st() {
@@ -734,8 +737,7 @@ function ResultsPage(props: { user: any }) {
             style: {
               flexDirection: "row",
               alignItems: "center",
-              marginBottom: 4,
-              flexWrap: "wrap",
+              marginBottom: 6,
             },
           },
           React.createElement(
@@ -743,36 +745,57 @@ function ResultsPage(props: { user: any }) {
             {
               style: {
                 color: C.text,
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: "700",
+                flexShrink: 1,
                 marginRight: 8,
               },
               numberOfLines: 1,
             },
             getTag(author),
           ),
-          React.createElement(
-            Text,
-            {
-              style: {
-                color: C.textFaint,
-                fontSize: 11,
-                marginRight: 8,
-              },
-              numberOfLines: 1,
-            },
-            channelLabel(item.channel_id),
-          ),
           timeStr
             ? React.createElement(
-                Text,
+                View,
                 {
-                  style: { color: C.textFaint, fontSize: 11 },
-                  numberOfLines: 1,
+                  style: {
+                    marginLeft: "auto",
+                    backgroundColor: C.timeBg,
+                    borderColor: C.timeBorder,
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                  },
                 },
-                timeStr,
+                React.createElement(
+                  Text,
+                  {
+                    style: {
+                      color: C.time,
+                      fontSize: 12,
+                      fontWeight: "800",
+                      letterSpacing: 0.2,
+                    },
+                    numberOfLines: 1,
+                  },
+                  timeStr,
+                ),
               )
             : null,
+        ),
+        React.createElement(
+          Text,
+          {
+            style: {
+              color: C.textMuted,
+              fontSize: 12,
+              marginBottom: 6,
+              fontWeight: "600",
+            },
+            numberOfLines: 1,
+          },
+          channelLabel(item.channel_id),
         ),
         React.createElement(MessageContent, {
           content:
@@ -1194,7 +1217,7 @@ function patchMessageSheet() {
 export function onLoad() {
   defaults();
   try {
-    showToast("QuickFrom v1.4 已启动");
+    showToast("QuickFrom v1.4.1 已启动");
   } catch (e) {
     console.log("[QuickFrom] toast failed", e);
   }
