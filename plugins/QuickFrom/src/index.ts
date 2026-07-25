@@ -1,12 +1,13 @@
 /**
- * QuickFrom v1.5
- * 长按消息 → 打开 Discord **原生搜索页**（from: / author）
- * 原生打不开时才用自建结果页兜底
+ * QuickFrom v1.6
+ * 长按消息 → 自建「类原生搜索」结果页
+ * - 不 push 字符串路由 "Search"（会 Invariant Violation）
+ * - 精确到秒的时间、头像、自定义表情、图片、分页
  *
- * Revenge loader: eval(`vendetta=>{return ${js}}`)(vendettaForPlugins)
+ * Revenge: eval(`vendetta=>{return ${js}}`)(vendettaForPlugins)
  */
 import { findByProps, findByName, findByStoreName } from "@vendetta/metro";
-import { React, ReactNative, FluxDispatcher, clipboard } from "@vendetta/metro/common";
+import { React, ReactNative } from "@vendetta/metro/common";
 import { after, before } from "@vendetta/patcher";
 import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
@@ -16,42 +17,42 @@ import { storage } from "@vendetta/plugin";
 var patches: Array<() => void> = [];
 var PAGE_SIZE = 25;
 
+/* Discord Android search-ish tokens */
 var C = {
   bg: "#313338",
-  surface: "#2b2d31",
-  surfacePress: "#232428",
+  panel: "#2b2d31",
+  input: "#1e1f22",
+  elev: "#232428",
+  press: "#1a1b1e",
   border: "#1e1f22",
+  hair: "rgba(255,255,255,0.06)",
   text: "#f2f3f5",
-  textMuted: "#b5bac1",
-  textFaint: "#949ba4",
+  muted: "#b5bac1",
+  faint: "#949ba4",
+  link: "#00a8fc",
   accent: "#5865f2",
   accentDim: "#4752c4",
   danger: "#f23f43",
-  chip: "#1e1f22",
+  chip: "#5865f2",
+  chipText: "#fff",
   time: "#00a8fc",
-  timeBg: "rgba(0, 168, 252, 0.12)",
-  timeBorder: "rgba(0, 168, 252, 0.35)",
-  headerBg: "#2b2d31",
 };
 
 function st() {
   return storage as any;
 }
-
 function defaults() {
   var s = st();
   if (s.sheet === undefined) s.sheet = true;
-  // preferNative: true = try Discord search UI first
-  if (s.preferNative === undefined) s.preferNative = true;
   if (s.useUserId === undefined) s.useUserId = true;
   if (s.showImages === undefined) s.showImages = true;
   if (s.showEmoji === undefined) s.showEmoji = true;
 }
 
 function fp() {
-  var args = arguments;
-  var arr: string[] = [];
-  for (var i = 0; i < args.length; i++) arr.push(args[i]);
+  var a = arguments,
+    arr: string[] = [];
+  for (var i = 0; i < a.length; i++) arr.push(a[i]);
   try {
     return findByProps.apply(null, arr);
   } catch (e) {
@@ -67,11 +68,13 @@ function getUserId(user: any): string | null {
 function getTag(user: any): string {
   if (!user) return "?";
   var name =
-    user.username ||
     user.global_name ||
     user.globalName ||
+    user.username ||
     (user.user &&
-      (user.user.username || user.user.global_name || user.user.globalName)) ||
+      (user.user.global_name ||
+        user.user.globalName ||
+        user.user.username)) ||
     "";
   var disc = user.discriminator || (user.user && user.user.discriminator);
   if (disc && disc !== "0" && disc !== "0000") return name + "#" + disc;
@@ -94,8 +97,7 @@ function selectedGuildId(): string | null {
     var gs = findByStoreName("SelectedGuildStore") || fp("getGuildId");
     var id = gs && gs.getGuildId && gs.getGuildId();
     if (id) return id;
-    var cs =
-      findByStoreName("SelectedChannelStore") || fp("getChannelId");
+    var cs = findByStoreName("SelectedChannelStore") || fp("getChannelId");
     var cid = cs && cs.getChannelId && cs.getChannelId();
     var chStore = findByStoreName("ChannelStore") || fp("getChannel");
     var ch = cid && chStore && chStore.getChannel && chStore.getChannel(cid);
@@ -105,23 +107,21 @@ function selectedGuildId(): string | null {
   }
 }
 
-function selectedChannelId(): string | null {
-  try {
-    var cs =
-      findByStoreName("SelectedChannelStore") || fp("getChannelId");
-    return (cs && cs.getChannelId && cs.getChannelId()) || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-function channelLabel(id: string): string {
+function channelMeta(id: string): { name: string; guild: string } {
   try {
     var chStore = findByStoreName("ChannelStore") || fp("getChannel");
     var ch = chStore && chStore.getChannel && chStore.getChannel(id);
-    if (ch && ch.name) return "#" + ch.name;
-  } catch (e) {}
-  return "#" + String(id).slice(-4);
+    var name = ch && ch.name ? "#" + ch.name : "#" + String(id).slice(-4);
+    var gname = "";
+    try {
+      var gs = findByStoreName("GuildStore") || fp("getGuild");
+      var g = ch && ch.guild_id && gs && gs.getGuild && gs.getGuild(ch.guild_id);
+      gname = (g && g.name) || "";
+    } catch (e) {}
+    return { name: name, guild: gname };
+  } catch (e) {
+    return { name: "#" + String(id).slice(-4), guild: "" };
+  }
 }
 
 function fmtTime(ts: any): string {
@@ -134,14 +134,16 @@ function fmtTime(ts: any): string {
     }
     return (
       d.getFullYear() +
-      "-" +
+      "/" +
       pad(d.getMonth() + 1) +
-      "-" +
+      "/" +
       pad(d.getDate()) +
       " " +
       pad(d.getHours()) +
       ":" +
-      pad(d.getMinutes())
+      pad(d.getMinutes()) +
+      ":" +
+      pad(d.getSeconds())
     );
   } catch (e) {
     return String(ts);
@@ -149,7 +151,7 @@ function fmtTime(ts: any): string {
 }
 
 function avatarUrl(user: any, size?: number): string {
-  var sz = size || 64;
+  var sz = size || 80;
   if (!user) return "https://cdn.discordapp.com/embed/avatars/0.png";
   var id = getUserId(user);
   var avatar = user.avatar || (user.user && user.user.avatar);
@@ -175,14 +177,15 @@ function avatarUrl(user: any, size?: number): string {
       if (isNaN(n)) n = 0;
       idx = Math.abs(n) % 6;
     }
-  } catch (e) {
-    idx = 0;
-  }
+  } catch (e) {}
   return "https://cdn.discordapp.com/embed/avatars/" + idx + ".png";
 }
 
 function http() {
-  return fp("get", "post", "put", "patch", "del") || fp("get", "post", "put", "patch", "delete");
+  return (
+    fp("get", "post", "put", "patch", "del") ||
+    fp("get", "post", "put", "patch", "delete")
+  );
 }
 
 function parseContentTokens(content: string): any[] {
@@ -216,188 +219,6 @@ function emojiCdn(id: string, animated: boolean): string {
     "?size=48&quality=lossless"
   );
 }
-
-/**
- * Try hard to open Discord's native in-guild search with query filled.
- * Returns true if something that looks like native search was triggered.
- */
-function openNativeSearch(user: any): boolean {
-  var query = buildQuery(user);
-  var guildId = selectedGuildId();
-  var channelId = selectedChannelId();
-  var authorId = getUserId(user);
-  var tried: string[] = [];
-
-  function ok( whi: string) {
-    tried.push(whi + ":ok");
-    try {
-      showToast("原生搜索 · " + query, getAssetIDByName("ic_search"));
-    } catch (e) {}
-    console.log("[QuickFrom] native search via", whi, query);
-    return true;
-  }
-
-  // 1) openSearch modules (various builds)
-  var searchMods = [
-    fp("openSearch", "dismissSearch"),
-    fp("openSearch", "closeSearch"),
-    fp("openSearch"),
-    fp("openSearchModal"),
-    fp("showSearch"),
-  ];
-  for (var i = 0; i < searchMods.length; i++) {
-    var sm = searchMods[i];
-    if (!sm) continue;
-    var open =
-      sm.openSearch || sm.openSearchModal || sm.showSearch || null;
-    if (!open) continue;
-    var payloads = [
-      { query: query },
-      query,
-      { searchQuery: query, queryString: query },
-      { query: query, guildId: guildId, channelId: channelId },
-      {
-        query: query,
-        guildId: guildId,
-        channelId: channelId,
-        authorId: authorId,
-      },
-      {
-        searchContext: { guildId: guildId, channelId: channelId },
-        query: query,
-      },
-    ];
-    for (var p = 0; p < payloads.length; p++) {
-      try {
-        open.call(sm, payloads[p]);
-        return ok("openSearch#" + p);
-      } catch (e) {}
-    }
-    try {
-      open.call(sm);
-      // set query after open
-      var setter =
-        fp("setSearchQuery") ||
-        fp("updateSearchQuery") ||
-        fp("setQueryString") ||
-        fp("setQuery");
-      if (setter) {
-        try {
-          if (setter.setSearchQuery) setter.setSearchQuery(query);
-          if (setter.updateSearchQuery) setter.updateSearchQuery(query);
-          if (setter.setQueryString) setter.setQueryString(query);
-          if (setter.setQuery) setter.setQuery(query);
-        } catch (e2) {}
-      }
-      return ok("openSearch-bare");
-    } catch (e) {}
-  }
-
-  // 2) Search actions / store
-  var actions =
-    fp("search", "setQuery") ||
-    fp("setSearchQuery", "search") ||
-    fp("clearSearch", "setSearchQuery") ||
-    fp("SEARCH", "setSearchQuery");
-  if (actions) {
-    tried.push("searchActions");
-    try {
-      if (actions.setSearchQuery) actions.setSearchQuery(query);
-      if (actions.updateSearchQuery) actions.updateSearchQuery(query);
-      if (actions.setQueryString) actions.setQueryString(query);
-      if (actions.setQuery) actions.setQuery(query);
-      if (actions.search) actions.search(query);
-      if (actions.openSearch) {
-        actions.openSearch({ query: query, guildId: guildId });
-        return ok("actions.openSearch");
-      }
-    } catch (e) {}
-  }
-
-  // 3) FluxDispatcher — fire common search events then try open again
-  var FD =
-    FluxDispatcher ||
-    fp("dispatch", "subscribe") ||
-    fp("dispatch", "wait");
-  if (FD && FD.dispatch) {
-    tried.push("flux");
-    var events = [
-      { type: "SEARCH_SET_QUERY", query: query },
-      { type: "SEARCH_QUERY_UPDATE", query: query },
-      {
-        type: "SEARCH_EDITOR_STATE_CHANGE",
-        query: query,
-        searchContext: { guildId: guildId, channelId: channelId },
-      },
-      {
-        type: "SEARCH_START",
-        query: query,
-        guildId: guildId,
-        channelId: channelId,
-      },
-      {
-        type: "LAYER_PUSH",
-        layer: "SEARCH",
-        query: query,
-        guildId: guildId,
-      },
-      {
-        type: "SEARCH_MODAL_OPEN",
-        query: query,
-        guildId: guildId,
-        channelId: channelId,
-      },
-    ];
-    for (var ei = 0; ei < events.length; ei++) {
-      try {
-        FD.dispatch(events[ei]);
-      } catch (e) {}
-    }
-    // retry openSearch after flux
-    for (var j = 0; j < searchMods.length; j++) {
-      var sm2 = searchMods[j];
-      var open2 = sm2 && (sm2.openSearch || sm2.openSearchModal);
-      if (!open2) continue;
-      try {
-        open2.call(sm2, { query: query, guildId: guildId });
-        return ok("flux+openSearch");
-      } catch (e) {}
-      try {
-        open2.call(sm2, query);
-        return ok("flux+openSearch-q");
-      } catch (e) {}
-    }
-  }
-
-  // 4) Navigation routes used on some mobile builds
-  var Nav = fp("push", "pushLazy", "pop") || fp("push", "pop");
-  if (Nav && Nav.push) {
-    tried.push("nav");
-    var routes = [
-      ["Search", { query: query, guildId: guildId }],
-      ["GuildSearch", { query: query, queryString: query, guildId: guildId }],
-      ["ChatSearch", { query: query, channelId: channelId }],
-      ["SearchResults", { query: query }],
-      ["SearchModal", { query: query }],
-    ];
-    for (var r = 0; r < routes.length; r++) {
-      try {
-        Nav.push(routes[r][0], routes[r][1]);
-        return ok("nav:" + routes[r][0]);
-      } catch (e) {}
-    }
-  }
-
-  // 5) Clipboard + tip (still "native" path user can paste)
-  try {
-    if (clipboard && clipboard.setString) clipboard.setString(query);
-  } catch (e) {}
-
-  console.log("[QuickFrom] native search failed, tried:", tried.join(","));
-  return false;
-}
-
-/* ───────── fallback custom page (native-ish layout) ───────── */
 
 async function searchByAuthor(
   guildId: string,
@@ -468,17 +289,40 @@ function jumpTo(guildId: string, channelId: string, messageId: string) {
   return false;
 }
 
+function openImage(url: string) {
+  try {
+    var Media = fp("openMediaModal") || fp("showMediaModal");
+    if (Media && Media.openMediaModal) {
+      Media.openMediaModal({
+        images: [{ url: url, source: { uri: url } }],
+        index: 0,
+      });
+      return;
+    }
+  } catch (e) {}
+  try {
+    var u = fp("openURL") || fp("openUrl");
+    if (u && u.openURL) u.openURL(url);
+    else if (u && u.openUrl) u.openUrl(url);
+  } catch (e) {}
+}
+
+function isImageAtt(a: any): boolean {
+  if (!a) return false;
+  var ct = String(a.content_type || "").toLowerCase();
+  if (ct.indexOf("image/") === 0) return true;
+  var name = String(a.filename || a.url || "").toLowerCase();
+  return (
+    /\.(png|jpe?g|gif|webp|bmp)(\?|$)/i.test(name) ||
+    !!(a.width && a.height && a.url)
+  );
+}
+
 function MessageContent(props: { content: string }) {
   var Text = ReactNative.Text;
   var Image = ReactNative.Image;
   var content = props.content || "";
-  if (!content) {
-    return React.createElement(
-      Text,
-      { style: { color: C.textFaint, fontSize: 15, lineHeight: 20 } },
-      "",
-    );
-  }
+  if (!content) return null;
   if (st().showEmoji === false) {
     return React.createElement(
       Text,
@@ -505,7 +349,9 @@ function MessageContent(props: { content: string }) {
       kids.push(
         React.createElement(Image, {
           key: "e" + i,
-          source: { uri: emojiCdn(tok.id, tok.animated) },
+          source: {
+            uri: emojiCdn(tok.id, tok.animated),
+          },
           style: {
             width: 20,
             height: 20,
@@ -522,10 +368,51 @@ function MessageContent(props: { content: string }) {
   );
 }
 
-function FallbackResultsPage(props: { user: any }) {
+function PagerBtn(props: any) {
+  var Pressable = ReactNative.Pressable;
+  var Text = ReactNative.Text;
+  return React.createElement(
+    Pressable,
+    {
+      onPress: props.disabled ? undefined : props.onPress,
+      disabled: !!props.disabled,
+      hitSlop: 8,
+      style: function (state: any) {
+        var pressed = state && state.pressed;
+        return {
+          paddingHorizontal: 14,
+          paddingVertical: 9,
+          borderRadius: 16,
+          backgroundColor: props.disabled
+            ? C.elev
+            : pressed
+              ? C.accentDim
+              : props.ghost
+                ? C.elev
+                : C.accent,
+          opacity: props.disabled ? 0.45 : 1,
+          marginRight: props.mr || 0,
+        };
+      },
+    },
+    React.createElement(
+      Text,
+      { style: { color: C.text, fontSize: 13, fontWeight: "700" } },
+      props.label,
+    ),
+  );
+}
+
+/**
+ * Search results page — layout mirrors Discord mobile search:
+ * top query bar + result count, then message hits with avatar/name/time/content.
+ */
+function SearchResultsPage(props: { user: any }) {
   var user = props.user;
   var authorId = getUserId(user);
   var tag = getTag(user);
+  var query = buildQuery(user);
+
   var View = ReactNative.View;
   var Text = ReactNative.Text;
   var FlatList = ReactNative.FlatList;
@@ -533,6 +420,7 @@ function FallbackResultsPage(props: { user: any }) {
   var ActivityIndicator = ReactNative.ActivityIndicator;
   var TextInput = ReactNative.TextInput;
   var Image = ReactNative.Image;
+  var ScrollView = ReactNative.ScrollView;
 
   var guildId = React.useMemo(function () {
     return selectedGuildId();
@@ -556,6 +444,7 @@ function FallbackResultsPage(props: { user: any }) {
   var _items = React.useState([] as any[]);
   var items = _items[0];
   var setItems = _items[1];
+
   var totalPages = Math.max(1, Math.ceil((total || 0) / PAGE_SIZE) || 1);
 
   function loadPage(p: number) {
@@ -565,8 +454,13 @@ function FallbackResultsPage(props: { user: any }) {
     setLoading(true);
     setError(null);
     (async function () {
-      if (!authorId || !guildId) {
-        setError(!guildId ? "请在服务器频道使用" : "无用户 ID");
+      if (!authorId) {
+        setError("无用户 ID");
+        setLoading(false);
+        return;
+      }
+      if (!guildId) {
+        setError("请在服务器频道里使用（私信没有服务器搜索）");
         setLoading(false);
         return;
       }
@@ -578,6 +472,11 @@ function FallbackResultsPage(props: { user: any }) {
         );
         setTotal(res.total);
         setItems(res.messages);
+        var tp = Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE) || 1);
+        if (target > tp && tp !== target) {
+          loadPage(tp);
+          return;
+        }
       } catch (err: any) {
         setError(
           "搜索失败: " +
@@ -604,119 +503,273 @@ function FallbackResultsPage(props: { user: any }) {
     loadPage(n);
   }
 
-  // Native-search-like row: avatar | name+time / content  (Discord search result style)
+  function renderImages(m: any) {
+    if (st().showImages === false || !Image) return null;
+    var imgs: any[] = [];
+    var atts = m.attachments || [];
+    for (var i = 0; i < atts.length; i++) {
+      if (isImageAtt(atts[i])) imgs.push(atts[i]);
+    }
+    var embeds = m.embeds || [];
+    for (var e = 0; e < embeds.length; e++) {
+      var emb = embeds[e];
+      if (emb && emb.image && (emb.image.proxy_url || emb.image.url)) {
+        imgs.push({
+          url: emb.image.proxy_url || emb.image.url,
+          width: emb.image.width,
+          height: emb.image.height,
+        });
+      }
+    }
+    var stickers = m.sticker_items || m.stickers || [];
+    for (var s = 0; s < stickers.length; s++) {
+      var sticker = stickers[s];
+      if (!sticker || !sticker.id) continue;
+      var ext = sticker.format_type === 4 ? "gif" : "png";
+      imgs.push({
+        url:
+          "https://media.discordapp.net/stickers/" +
+          sticker.id +
+          "." +
+          ext +
+          "?size=160",
+        width: 120,
+        height: 120,
+      });
+    }
+    if (!imgs.length) return null;
+    var kids: any[] = [];
+    for (var k = 0; k < imgs.length; k++) {
+      (function (att, idx) {
+        var uri = att.proxy_url || att.url;
+        if (!uri) return;
+        var w = att.width || 160;
+        var h = att.height || 120;
+        var maxW = 180;
+        var scale = w > maxW ? maxW / w : 1;
+        kids.push(
+          React.createElement(
+            Pressable,
+            {
+              key: uri + idx,
+              onPress: function () {
+                openImage(uri);
+              },
+              style: function (state: any) {
+                return {
+                  marginTop: 8,
+                  marginRight: 8,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  opacity: state && state.pressed ? 0.85 : 1,
+                };
+              },
+            },
+            React.createElement(Image, {
+              source: { uri: uri },
+              style: {
+                width: Math.max(72, Math.round(w * scale)),
+                height: Math.max(56, Math.round(h * scale)),
+                backgroundColor: C.elev,
+              },
+              resizeMode: "cover",
+            }),
+          ),
+        );
+      })(imgs[k], k);
+    }
+    if (!kids.length) return null;
+    return React.createElement(
+      ScrollView,
+      { horizontal: true, showsHorizontalScrollIndicator: false },
+      kids,
+    );
+  }
+
   function renderRow(info: any) {
     var item = info.item;
     var author = item.author || user;
-    var timeStr = fmtTime(item.timestamp);
+    var timeStr = fmtTime(item.timestamp || item.edited_timestamp);
+    var meta = channelMeta(item.channel_id);
+
+    // Discord search groups hits under a channel context strip
     return React.createElement(
-      Pressable,
+      View,
       {
-        onPress: function () {
-          jumpTo(guildId as string, item.channel_id, item.id);
-          try {
-            var Nav = fp("pop", "push");
-            if (Nav && Nav.pop) Nav.pop();
-          } catch (e) {}
-        },
-        delayPressIn: 30,
-        style: function (state: any) {
-          return {
-            flexDirection: "row",
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-            backgroundColor:
-              state && state.pressed ? C.surfacePress : C.bg,
-            borderBottomWidth: 1,
-            borderBottomColor: "rgba(0,0,0,0.25)",
-          };
+        style: {
+          backgroundColor: C.bg,
+          borderBottomWidth: 8,
+          borderBottomColor: C.panel,
         },
       },
-      Image
-        ? React.createElement(Image, {
-            source: { uri: avatarUrl(author, 80) },
-            style: {
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              marginRight: 12,
-              backgroundColor: C.chip,
-            },
-          })
-        : null,
+      // channel context bar (like native search)
       React.createElement(
         View,
-        { style: { flex: 1, minWidth: 0 } },
-        React.createElement(
-          View,
-          {
-            style: {
-              flexDirection: "row",
-              alignItems: "baseline",
-              marginBottom: 2,
-            },
+        {
+          style: {
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 16,
+            paddingTop: 10,
+            paddingBottom: 4,
           },
-          React.createElement(
-            Text,
-            {
-              style: {
-                color: C.text,
-                fontSize: 16,
-                fontWeight: "600",
-                marginRight: 8,
-              },
-              numberOfLines: 1,
-            },
-            getTag(author),
-          ),
-          timeStr
-            ? React.createElement(
-                Text,
-                {
-                  style: {
-                    color: C.time,
-                    fontSize: 12,
-                    fontWeight: "700",
-                  },
-                },
-                timeStr,
-              )
-            : null,
-        ),
+        },
         React.createElement(
           Text,
           {
             style: {
-              color: C.textFaint,
+              color: C.faint,
               fontSize: 12,
-              marginBottom: 4,
+              fontWeight: "600",
             },
+            numberOfLines: 1,
           },
-          channelLabel(item.channel_id),
+          (meta.guild ? meta.guild + "  ›  " : "") + meta.name,
         ),
-        React.createElement(MessageContent, {
-          content: item.content || "",
-        }),
+      ),
+      // message hit
+      React.createElement(
+        Pressable,
+        {
+          onPress: function () {
+            var ok = jumpTo(guildId as string, item.channel_id, item.id);
+            if (!ok) {
+              try {
+                showToast("无法跳转");
+              } catch (e) {}
+            } else {
+              try {
+                var Nav = fp("pop", "push");
+                if (Nav && Nav.pop) Nav.pop();
+              } catch (e) {}
+            }
+          },
+          delayPressIn: 35,
+          style: function (state: any) {
+            return {
+              flexDirection: "row",
+              paddingHorizontal: 16,
+              paddingTop: 6,
+              paddingBottom: 12,
+              backgroundColor:
+                state && state.pressed ? C.press : C.bg,
+            };
+          },
+        },
+        Image
+          ? React.createElement(Image, {
+              source: { uri: avatarUrl(author, 80) },
+              style: {
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                marginRight: 12,
+                backgroundColor: C.elev,
+                marginTop: 2,
+              },
+            })
+          : React.createElement(View, {
+              style: {
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                marginRight: 12,
+                backgroundColor: C.accent,
+              },
+            }),
+        React.createElement(
+          View,
+          { style: { flex: 1, minWidth: 0 } },
+          React.createElement(
+            View,
+            {
+              style: {
+                flexDirection: "row",
+                alignItems: "baseline",
+                flexWrap: "wrap",
+                marginBottom: 2,
+              },
+            },
+            React.createElement(
+              Text,
+              {
+                style: {
+                  color: C.text,
+                  fontSize: 16,
+                  fontWeight: "600",
+                  marginRight: 8,
+                },
+                numberOfLines: 1,
+              },
+              getTag(author),
+            ),
+            // prominent absolute time — native only shows relative/vague
+            timeStr
+              ? React.createElement(
+                  Text,
+                  {
+                    style: {
+                      color: C.time,
+                      fontSize: 12,
+                      fontWeight: "700",
+                    },
+                    numberOfLines: 1,
+                  },
+                  timeStr,
+                )
+              : null,
+          ),
+          React.createElement(MessageContent, {
+            content: item.content || "",
+          }),
+          !item.content &&
+            !(item.attachments && item.attachments.length) &&
+            !(item.sticker_items && item.sticker_items.length)
+            ? React.createElement(
+                Text,
+                {
+                  style: {
+                    color: C.faint,
+                    fontSize: 14,
+                    fontStyle: "italic",
+                  },
+                },
+                "(无文字内容)",
+              )
+            : null,
+          renderImages(item),
+        ),
       ),
     );
   }
 
-  return React.createElement(
+  // Top bar mimicking native search field + from-chip
+  var header = React.createElement(
     View,
-    { style: { flex: 1, backgroundColor: C.bg } },
-    // Search-bar lookalike header
+    {
+      style: {
+        backgroundColor: C.panel,
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: C.border,
+      },
+    },
     React.createElement(
       View,
       {
         style: {
-          backgroundColor: C.headerBg,
-          paddingHorizontal: 12,
-          paddingTop: 10,
-          paddingBottom: 10,
-          borderBottomWidth: 1,
-          borderBottomColor: C.border,
+          flexDirection: "row",
+          alignItems: "center",
+          backgroundColor: C.input,
+          borderRadius: 22,
+          paddingHorizontal: 6,
+          paddingVertical: 6,
+          minHeight: 44,
         },
       },
+      // from: chip like official filter pill
       React.createElement(
         View,
         {
@@ -724,189 +777,281 @@ function FallbackResultsPage(props: { user: any }) {
             flexDirection: "row",
             alignItems: "center",
             backgroundColor: C.chip,
-            borderRadius: 20,
-            paddingHorizontal: 14,
-            paddingVertical: 10,
+            borderRadius: 16,
+            paddingLeft: 4,
+            paddingRight: 10,
+            paddingVertical: 4,
+            marginRight: 8,
           },
         },
+        Image
+          ? React.createElement(Image, {
+              source: { uri: avatarUrl(user, 64) },
+              style: {
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+                marginRight: 6,
+              },
+            })
+          : null,
         React.createElement(
           Text,
-          { style: { color: C.accent, fontWeight: "700", fontSize: 14 } },
-          buildQuery(user),
+          {
+            style: {
+              color: C.chipText,
+              fontSize: 13,
+              fontWeight: "700",
+            },
+            numberOfLines: 1,
+          },
+          "from: " + tag,
         ),
       ),
       React.createElement(
         Text,
         {
-          style: {
-            color: C.textMuted,
-            fontSize: 12,
-            marginTop: 8,
-            marginLeft: 4,
-          },
+          style: { color: C.faint, fontSize: 13, flex: 1 },
+          numberOfLines: 1,
         },
-        loading
-          ? "搜索中…"
-          : error
-            ? error
-            : "— " +
-              total +
-              " 条结果 · 第 " +
-              page +
-              "/" +
-              totalPages +
-              " 页（原生搜索不可用时的兜底）",
+        query,
       ),
     ),
-    loading && items.length === 0
-      ? React.createElement(
-          View,
-          {
-            style: {
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-            },
-          },
-          React.createElement(ActivityIndicator, {
-            size: "large",
-            color: C.accent,
-          }),
-        )
-      : React.createElement(FlatList, {
-          style: { flex: 1 },
-          data: items,
-          keyExtractor: function (m: any, i: number) {
-            return m.id + "-" + i;
-          },
-          renderItem: renderRow,
-          ListEmptyComponent: React.createElement(
-            Text,
-            {
-              style: {
-                color: C.textMuted,
-                textAlign: "center",
-                marginTop: 40,
-              },
-            },
-            "没有结果",
-          ),
-        }),
+    React.createElement(
+      Text,
+      {
+        style: {
+          color: C.muted,
+          fontSize: 12,
+          marginTop: 10,
+          marginLeft: 4,
+          fontWeight: "600",
+        },
+      },
+      loading
+        ? "正在搜索…"
+        : error
+          ? error
+          : "—  " +
+            total +
+            "  条结果" +
+            (totalPages > 1
+              ? "   ·   第 " + page + " / " + totalPages + " 页"
+              : ""),
+    ),
+  );
+
+  var pager = React.createElement(
+    View,
+    {
+      style: {
+        backgroundColor: C.panel,
+        borderTopWidth: 1,
+        borderTopColor: C.border,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+      },
+    },
     React.createElement(
       View,
       {
         style: {
           flexDirection: "row",
           alignItems: "center",
-          padding: 10,
-          backgroundColor: C.headerBg,
-          borderTopWidth: 1,
-          borderTopColor: C.border,
+          marginBottom: 8,
         },
       },
-      React.createElement(
-        Pressable,
-        {
-          onPress: function () {
-            if (page > 1) loadPage(page - 1);
-          },
-          style: {
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            backgroundColor: C.accent,
-            borderRadius: 8,
-            opacity: page <= 1 ? 0.4 : 1,
-            marginRight: 8,
-          },
+      React.createElement(PagerBtn, {
+        label: "上一页",
+        disabled: page <= 1 || loading,
+        mr: 8,
+        onPress: function () {
+          if (page > 1) loadPage(page - 1);
         },
-        React.createElement(
-          Text,
-          { style: { color: "#fff", fontWeight: "600" } },
-          "上一页",
-        ),
-      ),
+      }),
       React.createElement(
         Text,
-        { style: { color: C.text, marginRight: 8 } },
-        page + "/" + totalPages,
-      ),
-      React.createElement(
-        Pressable,
         {
-          onPress: function () {
-            if (page < totalPages) loadPage(page + 1);
-          },
           style: {
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            backgroundColor: C.accent,
-            borderRadius: 8,
-            opacity: page >= totalPages ? 0.4 : 1,
-            marginRight: 8,
+            color: C.text,
+            fontSize: 13,
+            fontWeight: "700",
+            flex: 1,
+            textAlign: "center",
           },
         },
-        React.createElement(
-          Text,
-          { style: { color: "#fff", fontWeight: "600" } },
-          "下一页",
-        ),
+        page + " / " + totalPages,
+      ),
+      React.createElement(PagerBtn, {
+        label: "下一页",
+        disabled: page >= totalPages || loading,
+        onPress: function () {
+          if (page < totalPages) loadPage(page + 1);
+        },
+      }),
+    ),
+    React.createElement(
+      View,
+      { style: { flexDirection: "row", alignItems: "center" } },
+      React.createElement(
+        Text,
+        { style: { color: C.muted, fontSize: 12, marginRight: 8 } },
+        "跳到",
       ),
       React.createElement(TextInput, {
         value: jumpText,
         onChangeText: setJumpText,
         keyboardType: "number-pad",
+        returnKeyType: "go",
         onSubmitEditing: goJump,
+        placeholder: "页码",
+        placeholderTextColor: C.faint,
         style: {
-          width: 48,
-          height: 36,
-          backgroundColor: C.chip,
+          flex: 1,
+          height: 40,
+          borderRadius: 12,
+          paddingHorizontal: 12,
+          backgroundColor: C.input,
           color: C.text,
-          borderRadius: 8,
-          textAlign: "center",
-          marginRight: 6,
+          fontSize: 14,
+          marginRight: 8,
         },
       }),
+      React.createElement(PagerBtn, {
+        label: "Go",
+        ghost: true,
+        onPress: goJump,
+      }),
+    ),
+  );
+
+  var body: any;
+  if (loading && items.length === 0) {
+    body = React.createElement(
+      View,
+      {
+        style: {
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: C.bg,
+        },
+      },
+      React.createElement(ActivityIndicator, {
+        size: "large",
+        color: C.accent,
+      }),
       React.createElement(
-        Pressable,
+        Text,
+        { style: { color: C.muted, marginTop: 12, fontSize: 13 } },
+        "搜索消息中…",
+      ),
+    );
+  } else if (error && items.length === 0) {
+    body = React.createElement(
+      View,
+      {
+        style: {
+          flex: 1,
+          padding: 24,
+          justifyContent: "center",
+          backgroundColor: C.bg,
+        },
+      },
+      React.createElement(
+        Text,
         {
-          onPress: goJump,
           style: {
-            paddingHorizontal: 10,
-            paddingVertical: 8,
-            backgroundColor: C.chip,
-            borderRadius: 8,
+            color: C.danger,
+            textAlign: "center",
+            marginBottom: 16,
+            fontSize: 14,
           },
         },
-        React.createElement(Text, { style: { color: C.text } }, "跳转"),
+        error,
       ),
-    ),
+      React.createElement(PagerBtn, {
+        label: "重试",
+        onPress: function () {
+          loadPage(page);
+        },
+      }),
+    );
+  } else {
+    body = React.createElement(FlatList, {
+      data: items,
+      style: { flex: 1, backgroundColor: C.bg },
+      keyExtractor: function (m: any, idx: number) {
+        return m.id + "-" + idx;
+      },
+      renderItem: renderRow,
+      ListEmptyComponent: React.createElement(
+        Text,
+        {
+          style: {
+            color: C.muted,
+            textAlign: "center",
+            marginTop: 48,
+            fontSize: 14,
+          },
+        },
+        "没有找到消息",
+      ),
+      ListFooterComponent: loading
+        ? React.createElement(ActivityIndicator, {
+            style: { marginVertical: 16 },
+            color: C.accent,
+          })
+        : React.createElement(View, { style: { height: 12 } }),
+    });
+  }
+
+  return React.createElement(
+    View,
+    { style: { flex: 1, backgroundColor: C.bg } },
+    header,
+    body,
+    pager,
   );
 }
 
-function openFallbackPage(user: any) {
+function openResults(user: any) {
+  defaults();
+  var id = getUserId(user);
+  if (!id) {
+    try {
+      showToast("QuickFrom: 无用户 ID");
+    } catch (e) {}
+    return;
+  }
+
+  // ONLY push React components — never string route "Search" (crashes RN)
   var Navigation = fp("push", "pushLazy", "pop") || fp("push", "pop");
   var Navigator =
     findByName("Navigator") || (fp("Navigator") || {}).Navigator;
   if (Navigator && (Navigator as any).default)
     Navigator = (Navigator as any).default;
+
   if (!Navigation || !Navigation.push) {
     try {
-      showToast("无法打开页面");
+      showToast("QuickFrom: 无 Navigation.push");
     } catch (e) {}
     return;
   }
-  var title = "搜索 · " + getTag(user);
+
+  var title = "搜索结果";
   var closeBtn =
     (fp("getRenderCloseButton") || {}).getRenderCloseButton ||
     (fp("getHeaderCloseButton") || {}).getHeaderCloseButton;
+
   try {
     if (Navigator) {
       Navigation.push(function () {
         return React.createElement(Navigator, {
-          initialRouteName: "QuickFromResults",
+          initialRouteName: "QuickFromSearch",
           goBackOnBackPress: true,
           screens: {
-            QuickFromResults: {
+            QuickFromSearch: {
               title: title,
               headerLeft: closeBtn
                 ? closeBtn(function () {
@@ -916,7 +1061,7 @@ function openFallbackPage(user: any) {
                   })
                 : undefined,
               render: function () {
-                return React.createElement(FallbackResultsPage, {
+                return React.createElement(SearchResultsPage, {
                   user: user,
                 });
               },
@@ -925,44 +1070,14 @@ function openFallbackPage(user: any) {
         });
       });
     } else {
-      Navigation.push(FallbackResultsPage, { user: user });
+      Navigation.push(SearchResultsPage, { user: user });
     }
-    try {
-      showToast("已用自建结果页（原生搜索不可用）");
-    } catch (e) {}
   } catch (e) {
-    console.error("[QuickFrom] fallback", e);
-  }
-}
-
-/** Main entry: native first, fallback second */
-function openFromUser(user: any) {
-  defaults();
-  var id = getUserId(user);
-  if (!id && !getTag(user)) {
+    console.error("[QuickFrom] openResults", e);
     try {
-      showToast("QuickFrom: 无用户信息");
-    } catch (e) {}
-    return;
+      showToast("打开搜索页失败");
+    } catch (e2) {}
   }
-
-  if (st().preferNative !== false) {
-    var nativeOk = false;
-    try {
-      nativeOk = openNativeSearch(user);
-    } catch (e) {
-      console.error("[QuickFrom] native", e);
-    }
-    if (nativeOk) return;
-  }
-
-  // copy query always as safety
-  try {
-    var q = buildQuery(user);
-    if (clipboard && clipboard.setString) clipboard.setString(q);
-  } catch (e) {}
-
-  openFallbackPage(user);
 }
 
 function patchMessageSheet() {
@@ -1021,15 +1136,9 @@ function patchMessageSheet() {
             }
             if (!buttons || !buttons.length) return;
             for (var i = 0; i < buttons.length; i++) {
-              if (
-                buttons[i] &&
-                (buttons[i].key === "quickfrom" ||
-                  buttons[i].key === "quickfrom-native")
-              )
-                return;
+              if (buttons[i] && buttons[i].key === "quickfrom") return;
             }
 
-            // Primary: native-style search
             buttons.unshift(
               React.createElement(ActionSheetRow, {
                 key: "quickfrom",
@@ -1043,7 +1152,7 @@ function patchMessageSheet() {
                   try {
                     ActionSheet.hideActionSheet();
                   } catch (e) {}
-                  openFromUser(author);
+                  openResults(author);
                 },
               }),
             );
@@ -1061,19 +1170,15 @@ function patchMessageSheet() {
 export function onLoad() {
   defaults();
   try {
-    showToast("QuickFrom v1.5 · 优先原生搜索");
+    showToast("QuickFrom v1.6 已启动");
   } catch (e) {}
-
   try {
     var p = patchMessageSheet();
     if (p) patches.push(p);
   } catch (e) {
-    console.error("[QuickFrom] sheet hook", e);
-    try {
-      showToast("QuickFrom: hook 失败");
-    } catch (e2) {}
+    console.error("[QuickFrom] hook", e);
   }
-  console.log("[QuickFrom] v1.5 loaded");
+  console.log("[QuickFrom] v1.6");
 }
 
 export function onUnload() {
