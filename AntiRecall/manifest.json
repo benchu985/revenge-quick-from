@@ -1,0 +1,1 @@
+{"name":"AntiRecall","description":"本地保留已接收消息的撤回与编辑历史","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_message_delete"},"hash":"33443646e5c487df3cf5884a5c6d7f55074dcf4127610bd79a3d2806743d94ed"}

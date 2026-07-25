@@ -1,8 +1,8 @@
 /**
- * QuickFrom v1.6
+ * QuickFrom v1.8
  * 长按消息 → 自建「类原生搜索」结果页
  * - 不 push 字符串路由 "Search"（会 Invariant Violation）
- * - 精确到秒的时间、头像、自定义表情、图片、分页
+ * - 相对时间、关键词搜索、头像、自定义表情、图片、分页
  *
  * Revenge: eval(`vendetta=>{return ${js}}`)(vendettaForPlugins)
  */
@@ -132,19 +132,15 @@ function fmtTime(ts: any): string {
     function pad(n: number) {
       return n < 10 ? "0" + n : String(n);
     }
-    return (
-      d.getFullYear() +
-      "/" +
-      pad(d.getMonth() + 1) +
-      "/" +
-      pad(d.getDate()) +
-      " " +
-      pad(d.getHours()) +
-      ":" +
-      pad(d.getMinutes()) +
-      ":" +
-      pad(d.getSeconds())
-    );
+    var minutes = Math.floor(Math.max(0, Date.now() - d.getTime()) / 60000);
+    if (minutes < 1) return "刚刚";
+    if (minutes < 60) return minutes + " 分钟前";
+    if (minutes < 1440) {
+      var hours = Math.floor(minutes / 60);
+      var rest = minutes % 60;
+      return rest ? hours + " 小时 " + rest + " 分钟前" : hours + " 小时前";
+    }
+    return d.getFullYear() + "/" + pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
   } catch (e) {
     return String(ts);
   }
@@ -224,6 +220,7 @@ async function searchByAuthor(
   guildId: string,
   authorId: string,
   offset: number,
+  keyword?: string,
 ) {
   var api = http();
   if (!api || !api.get) throw new Error("no http");
@@ -233,7 +230,10 @@ async function searchByAuthor(
     "/messages/search?author_id=" +
     encodeURIComponent(authorId) +
     "&include_nsfw=true&offset=" +
-    encodeURIComponent(String(offset || 0));
+    encodeURIComponent(String(offset || 0)) +
+    (keyword && keyword.trim()
+      ? "&content=" + encodeURIComponent(keyword.trim())
+      : "");
   var res = await api.get(q);
   var body = (res && res.body) || res;
   var groups = (body && body.messages) || [];
@@ -444,6 +444,9 @@ function SearchResultsPage(props: { user: any }) {
   var _items = React.useState([] as any[]);
   var items = _items[0];
   var setItems = _items[1];
+  var _keyword = React.useState("");
+  var keyword = _keyword[0];
+  var setKeyword = _keyword[1];
 
   var totalPages = Math.max(1, Math.ceil((total || 0) / PAGE_SIZE) || 1);
 
@@ -469,6 +472,7 @@ function SearchResultsPage(props: { user: any }) {
           guildId,
           authorId,
           (target - 1) * PAGE_SIZE,
+          keyword,
         );
         setTotal(res.total);
         setItems(res.messages);
@@ -501,6 +505,10 @@ function SearchResultsPage(props: { user: any }) {
     var tp = Math.max(1, Math.ceil((total || 0) / PAGE_SIZE) || 1);
     if (n > tp) n = tp;
     loadPage(n);
+  }
+
+  function submitKeyword() {
+    loadPage(1);
   }
 
   function renderImages(m: any) {
@@ -808,14 +816,15 @@ function SearchResultsPage(props: { user: any }) {
           "from: " + tag,
         ),
       ),
-      React.createElement(
-        Text,
-        {
-          style: { color: C.faint, fontSize: 13, flex: 1 },
-          numberOfLines: 1,
-        },
-        query,
-      ),
+      React.createElement(TextInput, {
+        value: keyword,
+        onChangeText: setKeyword,
+        onSubmitEditing: submitKeyword,
+        returnKeyType: "search",
+        placeholder: "搜索此人的消息",
+        placeholderTextColor: C.faint,
+        style: { color: C.text, fontSize: 13, flex: 1, paddingVertical: 0 },
+      }),
     ),
     React.createElement(
       Text,
@@ -1170,7 +1179,7 @@ function patchMessageSheet() {
 export function onLoad() {
   defaults();
   try {
-    showToast("QuickFrom v1.6 已启动");
+    showToast("QuickFrom v1.8 已启动");
   } catch (e) {}
   try {
     var p = patchMessageSheet();
@@ -1178,7 +1187,7 @@ export function onLoad() {
   } catch (e) {
     console.error("[QuickFrom] hook", e);
   }
-  console.log("[QuickFrom] v1.6");
+  console.log("[QuickFrom] v1.8");
 }
 
 export function onUnload() {

@@ -1,6 +1,6 @@
 {
   "name": "QuickFrom",
-  "description": "v1.6 类原生搜索页 · 精确时间/头像/表情/分页（已修 Search 崩溃）",
+  "description": "v1.8 关键词搜索 · 相对时间/头像/表情/分页",
   "authors": [{ "name": "benchu985", "id": "0" }],
   "main": "src/index.ts",
   "vendetta": { "icon": "ic_search_24px" }
