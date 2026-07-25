@@ -1,1 +1,1 @@
-{"name":"QuickFrom","description":"v1.2 长按消息 → 搜索此人发言 (from/author_id)","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"dc623327168c87e0b14ae6558dd58c7c22c1582705d5b607affb0ca88227a3ac"}
+{"name":"QuickFrom","description":"v1.3 长按消息搜发言 · 分页/跳页/时间/图片","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"31b6510cb067b8971098082ce1d288d9beda2b65a9affbec64226fc5091ce8ed"}

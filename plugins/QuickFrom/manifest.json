@@ -1,6 +1,6 @@
 {
   "name": "QuickFrom",
-  "description": "v1.2 长按消息 → 搜索此人发言 (from/author_id)",
+  "description": "v1.3 长按消息搜发言 · 分页/跳页/时间/图片",
   "authors": [
     {
       "name": "benchu985",

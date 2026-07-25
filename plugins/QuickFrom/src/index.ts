@@ -1,26 +1,31 @@
 /**
- * QuickFrom — minimal Vendetta/Revenge plugin
- * Loader does: eval(`vendetta=>{return ${js}}`)(vendettaForPlugins)
- * So the bundle must be an IIFE expression that RETURNS { onLoad, onUnload, settings? }
+ * QuickFrom v1.3
+ * 长按消息 →「搜索此人发言」
+ * 自带结果页：分页 / 跳页 / 时间 / 图片
+ *
+ * Revenge loader: eval(`vendetta=>{return ${js}}`)(vendettaForPlugins)
  */
 import { findByProps, findByName, findByStoreName } from "@vendetta/metro";
 import { React, ReactNative } from "@vendetta/metro/common";
-import { after, before, instead } from "@vendetta/patcher";
+import { after, before } from "@vendetta/patcher";
 import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import { storage } from "@vendetta/plugin";
 
-const patches: Array<() => void> = [];
+var patches: Array<() => void> = [];
 
-function s() {
+/** Discord search returns ~25 hits per request */
+var PAGE_SIZE = 25;
+
+function st() {
   return storage as any;
 }
 
 function defaults() {
-  const st = s();
-  if (st.doubleTap === undefined) st.doubleTap = true;
-  if (st.sheet === undefined) st.sheet = true;
+  var s = st();
+  if (s.sheet === undefined) s.sheet = true;
+  if (s.showImages === undefined) s.showImages = true;
 }
 
 function getUserId(user: any): string | null {
@@ -30,7 +35,11 @@ function getUserId(user: any): string | null {
 
 function getTag(user: any): string {
   if (!user) return "?";
-  var name = user.username || user.globalName || (user.user && user.user.username) || "";
+  var name =
+    user.username ||
+    user.globalName ||
+    (user.user && (user.user.username || user.user.globalName)) ||
+    "";
   return name || getUserId(user) || "?";
 }
 
@@ -44,22 +53,14 @@ function http() {
 function selectedGuildId(): string | null {
   try {
     var gs = findByStoreName("SelectedGuildStore") || findByProps("getGuildId");
-    var id = gs && (gs.getGuildId && gs.getGuildId());
+    var id = gs && gs.getGuildId && gs.getGuildId();
     if (id) return id;
-    var cs = findByStoreName("SelectedChannelStore") || findByProps("getChannelId");
+    var cs =
+      findByStoreName("SelectedChannelStore") || findByProps("getChannelId");
     var cid = cs && cs.getChannelId && cs.getChannelId();
     var chStore = findByStoreName("ChannelStore") || findByProps("getChannel");
     var ch = cid && chStore && chStore.getChannel && chStore.getChannel(cid);
     return (ch && ch.guild_id) || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-function selectedChannelId(): string | null {
-  try {
-    var cs = findByStoreName("SelectedChannelStore") || findByProps("getChannelId");
-    return (cs && cs.getChannelId && cs.getChannelId()) || null;
   } catch (e) {
     return null;
   }
@@ -74,7 +75,58 @@ function channelLabel(id: string): string {
   return "#" + String(id).slice(-4);
 }
 
-async function searchByAuthor(guildId: string, authorId: string, channelId?: string | null) {
+function fmtTime(ts: any): string {
+  if (!ts) return "";
+  try {
+    var d = new Date(ts);
+    if (isNaN(d.getTime())) return String(ts);
+    function pad(n: number) {
+      return n < 10 ? "0" + n : String(n);
+    }
+    return (
+      d.getFullYear() +
+      "-" +
+      pad(d.getMonth() + 1) +
+      "-" +
+      pad(d.getDate()) +
+      " " +
+      pad(d.getHours()) +
+      ":" +
+      pad(d.getMinutes()) +
+      ":" +
+      pad(d.getSeconds())
+    );
+  } catch (e) {
+    return String(ts);
+  }
+}
+
+function isImageAtt(a: any): boolean {
+  if (!a) return false;
+  var ct = String(a.content_type || a.contentType || "").toLowerCase();
+  if (ct.indexOf("image/") === 0) return true;
+  var name = String(a.filename || a.url || "").toLowerCase();
+  return (
+    /\.(png|jpe?g|gif|webp|bmp)(\?|$)/i.test(name) ||
+    !!(a.width && a.height && a.url)
+  );
+}
+
+function imageUrl(a: any): string | null {
+  if (!a) return null;
+  return a.proxy_url || a.proxyUrl || a.url || null;
+}
+
+/**
+ * Guild message search.
+ * offset is absolute index into result set (0, 25, 50, ...).
+ */
+async function searchByAuthor(
+  guildId: string,
+  authorId: string,
+  offset: number,
+  channelId?: string | null,
+) {
   var api = http();
   if (!api || !api.get) throw new Error("no http");
 
@@ -83,7 +135,8 @@ async function searchByAuthor(guildId: string, authorId: string, channelId?: str
     guildId +
     "/messages/search?author_id=" +
     encodeURIComponent(authorId) +
-    "&include_nsfw=true";
+    "&include_nsfw=true&offset=" +
+    encodeURIComponent(String(offset || 0));
   if (channelId) q += "&channel_id=" + encodeURIComponent(channelId);
 
   var res = await api.get(q);
@@ -104,7 +157,7 @@ async function searchByAuthor(guildId: string, authorId: string, channelId?: str
     if (hit && hit.id) out.push(hit);
   }
   return {
-    total: (body && body.total_results) || out.length,
+    total: (body && body.total_results) != null ? body.total_results : out.length,
     messages: out,
   };
 }
@@ -140,35 +193,82 @@ function jumpTo(guildId: string, channelId: string, messageId: string) {
   return false;
 }
 
+function openImage(url: string) {
+  try {
+    var Media = findByProps("openMediaModal") || findByProps("showMediaModal");
+    if (Media && Media.openMediaModal) {
+      Media.openMediaModal({
+        images: [{ url: url, source: { uri: url } }],
+        index: 0,
+      });
+      return;
+    }
+    if (Media && Media.showMediaModal) {
+      Media.showMediaModal([{ url: url }]);
+      return;
+    }
+  } catch (e) {}
+  try {
+    var openUrl = findByProps("openURL") || findByProps("openUrl");
+    if (openUrl && openUrl.openURL) openUrl.openURL(url);
+    else if (openUrl && openUrl.openUrl) openUrl.openUrl(url);
+  } catch (e) {}
+}
+
 function ResultsPage(props: { user: any }) {
   var user = props.user;
   var authorId = getUserId(user);
   var tag = getTag(user);
+
   var View = ReactNative.View;
   var Text = ReactNative.Text;
   var FlatList = ReactNative.FlatList;
   var TouchableOpacity = ReactNative.TouchableOpacity;
   var ActivityIndicator = ReactNative.ActivityIndicator;
-
-  var _s = React.useState(true);
-  var loading = _s[0];
-  var setLoading = _s[1];
-  var _e = React.useState(null as string | null);
-  var error = _e[0];
-  var setError = _e[1];
-  var _t = React.useState(0);
-  var total = _t[0];
-  var setTotal = _t[1];
-  var _i = React.useState([] as any[]);
-  var items = _i[0];
-  var setItems = _i[1];
+  var TextInput = ReactNative.TextInput;
+  var Image = ReactNative.Image;
+  var ScrollView = ReactNative.ScrollView;
 
   var guildId = React.useMemo(function () {
     return selectedGuildId();
   }, []);
 
-  React.useEffect(function () {
-    var dead = false;
+  var _page = React.useState(1);
+  var page = _page[0];
+  var setPage = _page[1];
+
+  var _jump = React.useState("1");
+  var jumpText = _jump[0];
+  var setJumpText = _jump[1];
+
+  var _loading = React.useState(true);
+  var loading = _loading[0];
+  var setLoading = _loading[1];
+
+  var _error = React.useState(null as string | null);
+  var error = _error[0];
+  var setError = _error[1];
+
+  var _total = React.useState(0);
+  var total = _total[0];
+  var setTotal = _total[1];
+
+  var _items = React.useState([] as any[]);
+  var items = _items[0];
+  var setItems = _items[1];
+
+  var totalPages = Math.max(1, Math.ceil((total || 0) / PAGE_SIZE) || 1);
+
+  function loadPage(p: number) {
+    var target = p;
+    if (target < 1) target = 1;
+    setPage(target);
+    setJumpText(String(target));
+    setLoading(true);
+    setError(null);
+
+    var offset = (target - 1) * PAGE_SIZE;
+
     (async function () {
       if (!authorId) {
         setError("无用户 ID");
@@ -181,31 +281,50 @@ function ResultsPage(props: { user: any }) {
         return;
       }
       try {
-        var res = await searchByAuthor(guildId, authorId, null);
-        if (dead) return;
+        var res = await searchByAuthor(guildId, authorId, offset, null);
         setTotal(res.total);
         setItems(res.messages);
+        // clamp page if total smaller
+        var tp = Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE) || 1);
+        if (target > tp) {
+          // recurse once to last page
+          if (tp !== target) {
+            loadPage(tp);
+            return;
+          }
+        }
       } catch (err: any) {
-        if (dead) return;
         var msg =
           (err && err.body && err.body.message) ||
           (err && err.message) ||
           String(err);
         setError("搜索失败: " + msg);
+        setItems([]);
       } finally {
-        if (!dead) setLoading(false);
+        setLoading(false);
       }
     })();
-    return function () {
-      dead = true;
-    };
+  }
+
+  React.useEffect(function () {
+    loadPage(1);
   }, []);
+
+  function goJump() {
+    var n = parseInt(jumpText, 10);
+    if (isNaN(n) || n < 1) n = 1;
+    if (total > 0) {
+      var tp = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      if (n > tp) n = tp;
+    }
+    loadPage(n);
+  }
 
   function onPressItem(m: any) {
     var ok = jumpTo(guildId as string, m.channel_id, m.id);
     if (!ok) {
       try {
-        showToast("无法跳转，记下频道与消息 ID");
+        showToast("无法跳转该消息");
       } catch (e) {}
     } else {
       try {
@@ -215,11 +334,210 @@ function ResultsPage(props: { user: any }) {
     }
   }
 
+  function renderImages(m: any) {
+    if (st().showImages === false) return null;
+    var atts = m.attachments || [];
+    var imgs: any[] = [];
+    for (var i = 0; i < atts.length; i++) {
+      if (isImageAtt(atts[i])) imgs.push(atts[i]);
+    }
+    // also embeds with image/thumbnail
+    var embeds = m.embeds || [];
+    for (var e = 0; e < embeds.length; e++) {
+      var emb = embeds[e];
+      if (emb && emb.image && (emb.image.proxy_url || emb.image.url)) {
+        imgs.push({
+          url: emb.image.url,
+          proxy_url: emb.image.proxy_url || emb.image.url,
+          width: emb.image.width,
+          height: emb.image.height,
+          filename: "embed",
+        });
+      } else if (
+        emb &&
+        emb.thumbnail &&
+        (emb.thumbnail.proxy_url || emb.thumbnail.url)
+      ) {
+        imgs.push({
+          url: emb.thumbnail.url,
+          proxy_url: emb.thumbnail.proxy_url || emb.thumbnail.url,
+          width: emb.thumbnail.width,
+          height: emb.thumbnail.height,
+          filename: "thumb",
+        });
+      }
+    }
+    if (!imgs.length || !Image) return null;
+
+    var children: any[] = [];
+    for (var k = 0; k < imgs.length; k++) {
+      (function (att) {
+        var uri = imageUrl(att);
+        if (!uri) return;
+        var w = att.width || 200;
+        var h = att.height || 150;
+        var maxW = 220;
+        var scale = w > maxW ? maxW / w : 1;
+        var dw = Math.max(80, Math.round(w * scale));
+        var dh = Math.max(60, Math.round(h * scale));
+        children.push(
+          React.createElement(
+            TouchableOpacity,
+            {
+              key: uri + String(k),
+              onPress: function () {
+                openImage(uri as string);
+              },
+              style: { marginTop: 8, marginRight: 8 },
+            },
+            React.createElement(Image, {
+              source: { uri: uri },
+              style: {
+                width: dw,
+                height: dh,
+                borderRadius: 8,
+                backgroundColor: "rgba(0,0,0,0.3)",
+              },
+              resizeMode: "cover",
+            }),
+          ),
+        );
+      })(imgs[k]);
+    }
+    if (!children.length) return null;
+    return React.createElement(
+      ScrollView,
+      {
+        horizontal: true,
+        style: { marginTop: 4 },
+        showsHorizontalScrollIndicator: false,
+      },
+      children,
+    );
+  }
+
+  var pager = React.createElement(
+    View,
+    {
+      style: {
+        flexDirection: "row",
+        alignItems: "center",
+        flexWrap: "wrap",
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderTopWidth: 1,
+        borderTopColor: "rgba(255,255,255,0.08)",
+        backgroundColor: "rgba(0,0,0,0.2)",
+      },
+    },
+    React.createElement(
+      TouchableOpacity,
+      {
+        onPress: function () {
+          if (page > 1) loadPage(page - 1);
+        },
+        disabled: page <= 1 || loading,
+        style: {
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: 8,
+          marginRight: 6,
+          backgroundColor:
+            page <= 1 ? "rgba(255,255,255,0.05)" : "#5865F2",
+          opacity: page <= 1 ? 0.5 : 1,
+        },
+      },
+      React.createElement(
+        Text,
+        { style: { color: "#fff", fontSize: 13, fontWeight: "600" } },
+        "上一页",
+      ),
+    ),
+    React.createElement(
+      Text,
+      {
+        style: {
+          color: "#dbdee1",
+          fontSize: 13,
+          marginRight: 6,
+          minWidth: 72,
+          textAlign: "center",
+        },
+      },
+      page + " / " + totalPages,
+    ),
+    React.createElement(
+      TouchableOpacity,
+      {
+        onPress: function () {
+          if (page < totalPages) loadPage(page + 1);
+        },
+        disabled: page >= totalPages || loading,
+        style: {
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: 8,
+          marginRight: 8,
+          backgroundColor:
+            page >= totalPages ? "rgba(255,255,255,0.05)" : "#5865F2",
+          opacity: page >= totalPages ? 0.5 : 1,
+        },
+      },
+      React.createElement(
+        Text,
+        { style: { color: "#fff", fontSize: 13, fontWeight: "600" } },
+        "下一页",
+      ),
+    ),
+    React.createElement(
+      Text,
+      { style: { color: "#b5bac1", fontSize: 12, marginRight: 4 } },
+      "跳到",
+    ),
+    React.createElement(TextInput, {
+      value: jumpText,
+      onChangeText: setJumpText,
+      keyboardType: "number-pad",
+      returnKeyType: "go",
+      onSubmitEditing: goJump,
+      style: {
+        width: 52,
+        height: 34,
+        borderRadius: 8,
+        paddingHorizontal: 8,
+        backgroundColor: "rgba(0,0,0,0.35)",
+        color: "#fff",
+        textAlign: "center",
+        marginRight: 6,
+        fontSize: 13,
+      },
+    }),
+    React.createElement(
+      TouchableOpacity,
+      {
+        onPress: goJump,
+        style: {
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: 8,
+          backgroundColor: "rgba(255,255,255,0.12)",
+        },
+      },
+      React.createElement(
+        Text,
+        { style: { color: "#fff", fontSize: 13 } },
+        "Go",
+      ),
+    ),
+  );
+
   var header = React.createElement(
     View,
     {
       style: {
-        padding: 12,
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 8,
         borderBottomWidth: 1,
         borderBottomColor: "rgba(255,255,255,0.1)",
       },
@@ -232,42 +550,67 @@ function ResultsPage(props: { user: any }) {
     React.createElement(
       Text,
       { style: { color: "#b5bac1", fontSize: 12, marginTop: 4 } },
-      loading ? "搜索中…" : error ? error : "共 " + total + " 条",
+      loading
+        ? "搜索中… 第 " + page + " 页"
+        : error
+          ? error
+          : "共 " +
+            total +
+            " 条 · 每页 " +
+            PAGE_SIZE +
+            " · 第 " +
+            page +
+            "/" +
+            totalPages +
+            " 页",
     ),
   );
 
-  if (loading) {
-    return React.createElement(
+  var body: any;
+  if (loading && items.length === 0) {
+    body = React.createElement(
       View,
-      { style: { flex: 1 } },
-      header,
-      React.createElement(
-        View,
-        { style: { flex: 1, alignItems: "center", justifyContent: "center" } },
-        React.createElement(ActivityIndicator, { size: "large" }),
-      ),
-    );
-  }
-
-  if (error) {
-    return React.createElement(
-      View,
-      { style: { flex: 1 } },
-      header,
+      { style: { flex: 1, alignItems: "center", justifyContent: "center" } },
+      React.createElement(ActivityIndicator, { size: "large" }),
       React.createElement(
         Text,
-        { style: { color: "#f23f43", padding: 16 } },
-        error,
+        { style: { color: "#b5bac1", marginTop: 10 } },
+        "加载第 " + page + " 页…",
       ),
     );
-  }
-
-  return React.createElement(
-    View,
-    { style: { flex: 1 } },
-    header,
-    React.createElement(FlatList, {
+  } else if (error && items.length === 0) {
+    body = React.createElement(
+      View,
+      { style: { padding: 16 } },
+      React.createElement(
+        Text,
+        { style: { color: "#f23f43", marginBottom: 12 } },
+        error,
+      ),
+      React.createElement(
+        TouchableOpacity,
+        {
+          onPress: function () {
+            loadPage(page);
+          },
+          style: {
+            backgroundColor: "#5865F2",
+            padding: 12,
+            borderRadius: 8,
+            alignItems: "center",
+          },
+        },
+        React.createElement(
+          Text,
+          { style: { color: "#fff", fontWeight: "600" } },
+          "重试",
+        ),
+      ),
+    );
+  } else {
+    body = React.createElement(FlatList, {
       data: items,
+      style: { flex: 1 },
       keyExtractor: function (m: any, idx: number) {
         return m.id + "-" + idx;
       },
@@ -280,10 +623,16 @@ function ResultsPage(props: { user: any }) {
             marginTop: 40,
           },
         },
-        "没有搜到消息",
+        "本页没有消息",
       ),
+      ListFooterComponent: loading
+        ? React.createElement(ActivityIndicator, {
+            style: { marginVertical: 12 },
+          })
+        : null,
       renderItem: function (info: any) {
         var item = info.item;
+        var timeStr = fmtTime(item.timestamp || item.edited_timestamp);
         return React.createElement(
           TouchableOpacity,
           {
@@ -300,16 +649,32 @@ function ResultsPage(props: { user: any }) {
           React.createElement(
             Text,
             { style: { color: "#b5bac1", fontSize: 11, marginBottom: 4 } },
-            channelLabel(item.channel_id),
+            channelLabel(item.channel_id) +
+              (timeStr ? " · " + timeStr : ""),
           ),
           React.createElement(
             Text,
-            { style: { color: "#dbdee1", fontSize: 14 }, numberOfLines: 4 },
-            item.content || "(无文字)",
+            {
+              style: { color: "#dbdee1", fontSize: 14 },
+              numberOfLines: 6,
+            },
+            item.content ||
+              (item.attachments && item.attachments.length
+                ? "(附件)"
+                : "(无文字)"),
           ),
+          renderImages(item),
         );
       },
-    }),
+    });
+  }
+
+  return React.createElement(
+    View,
+    { style: { flex: 1 } },
+    header,
+    body,
+    pager,
   );
 }
 
@@ -322,9 +687,12 @@ function openResults(user: any) {
     return;
   }
 
-  var Navigation = findByProps("push", "pushLazy", "pop") || findByProps("push", "pop");
-  var Navigator = findByName("Navigator") || (findByProps("Navigator") || {}).Navigator;
-  if (Navigator && (Navigator as any).default) Navigator = (Navigator as any).default;
+  var Navigation =
+    findByProps("push", "pushLazy", "pop") || findByProps("push", "pop");
+  var Navigator =
+    findByName("Navigator") || (findByProps("Navigator") || {}).Navigator;
+  if (Navigator && (Navigator as any).default)
+    Navigator = (Navigator as any).default;
 
   if (!Navigation || !Navigation.push) {
     try {
@@ -333,7 +701,7 @@ function openResults(user: any) {
     return;
   }
 
-  var title = "from:" + getTag(user);
+  var title = getTag(user) + " 的发言";
   var closeBtn =
     (findByProps("getRenderCloseButton") || {}).getRenderCloseButton ||
     (findByProps("getHeaderCloseButton") || {}).getHeaderCloseButton;
@@ -365,9 +733,6 @@ function openResults(user: any) {
     } else {
       Navigation.push(ResultsPage, { user: user });
     }
-    try {
-      showToast("搜索 " + title);
-    } catch (e) {}
   } catch (e) {
     console.error("[QuickFrom] openResults", e);
     try {
@@ -389,7 +754,7 @@ function patchMessageSheet() {
 
   return before("openLazy", ActionSheet, function (args: any[]) {
     try {
-      if (s().sheet === false) return;
+      if (st().sheet === false) return;
       var comp = args[0];
       var key = args[1];
       var msg = args[2];
@@ -417,7 +782,9 @@ function patchMessageSheet() {
                 c.some &&
                 c.some(function (child: any) {
                   return (
-                    (child && child.type && child.type.name === "ActionSheetRow") ||
+                    (child &&
+                      child.type &&
+                      child.type.name === "ActionSheetRow") ||
                     (child && child.props && child.props.label)
                   );
                 })
@@ -426,7 +793,9 @@ function patchMessageSheet() {
 
             if (!buttons) {
               buttons = findInReactTree(component, function (x: any) {
-                return x && x[0] && x[0].type && x[0].type.name === "ButtonRow";
+                return (
+                  x && x[0] && x[0].type && x[0].type.name === "ButtonRow"
+                );
               });
             }
 
@@ -461,69 +830,10 @@ function patchMessageSheet() {
   });
 }
 
-function patchProfileOpen() {
-  var mod = findByProps("openUserProfileModal") || findByProps("openProfile");
-  if (!mod) return null;
-
-  var method = mod.openUserProfileModal
-    ? "openUserProfileModal"
-    : mod.openProfile
-      ? "openProfile"
-      : null;
-  if (!method) return null;
-
-  var last: Record<string, number> = {};
-  var timers: Record<string, any> = {};
-
-  return instead(method, mod, function (args: any[], orig: any) {
-    try {
-      if (s().doubleTap === false) return orig.apply(null, args);
-
-      var a0 = args[0];
-      var userId =
-        (typeof a0 === "string" ? a0 : null) ||
-        (a0 && a0.userId) ||
-        (a0 && a0.id) ||
-        (a0 && a0.user && a0.user.id) ||
-        null;
-      if (!userId) return orig.apply(null, args);
-
-      var now = Date.now();
-      var prev = last[userId] || 0;
-      last[userId] = now;
-
-      if (now - prev <= 350) {
-        if (timers[userId]) {
-          clearTimeout(timers[userId]);
-          delete timers[userId];
-        }
-        var user =
-          (a0 && a0.user) ||
-          (typeof a0 === "object" ? a0 : null) ||
-          { id: userId };
-        openResults(user);
-        return;
-      }
-
-      if (timers[userId]) clearTimeout(timers[userId]);
-      timers[userId] = setTimeout(function () {
-        delete timers[userId];
-        try {
-          orig.apply(null, args);
-        } catch (e) {}
-      }, 360);
-      return;
-    } catch (e) {
-      return orig.apply(null, args);
-    }
-  });
-}
-
 export function onLoad() {
   defaults();
-
   try {
-    showToast("QuickFrom v1.2 已启动");
+    showToast("QuickFrom v1.3 已启动");
   } catch (e) {
     console.log("[QuickFrom] toast failed", e);
   }
@@ -534,15 +844,8 @@ export function onLoad() {
   } catch (e) {
     console.error("[QuickFrom] message sheet failed", e);
     try {
-      showToast("QuickFrom: 消息菜单 hook 失败");
+      showToast("QuickFrom: 菜单 hook 失败");
     } catch (e2) {}
-  }
-
-  try {
-    var p2 = patchProfileOpen();
-    if (p2) patches.push(p2);
-  } catch (e) {
-    console.error("[QuickFrom] profile hook failed", e);
   }
 
   console.log("[QuickFrom] patches", patches.length);
