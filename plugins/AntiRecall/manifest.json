@@ -1,6 +1,6 @@
 {
   "name": "AntiRecall",
-  "description": "v2 仅归档编辑与撤回消息 · 批量本地保存",
+  "description": "v2.1 撤回消息保留在频道内 · 编辑/撤回批量归档",
   "authors": [{ "name": "benchu985", "id": "0" }],
   "main": "src/safe.ts",
   "vendetta": { "icon": "ic_message_delete" }

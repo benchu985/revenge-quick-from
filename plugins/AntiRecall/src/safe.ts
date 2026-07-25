@@ -126,6 +126,21 @@ function handleDelete(event: any) {
   item.deletedAt = now;
   item.updatedAt = now;
   enqueue(item);
+
+  // Preserve the cached message in the active channel. Discord receives an
+  // update instead of the delete action, while the original snapshot remains
+  // in the local archive as well.
+  event.message = Object.assign({}, old, {
+    channel_id: old.channel_id || channelId,
+    guild_id: old.guild_id || event.guildId || event.guild_id,
+    content: "[已撤回]\n" + (text(old) || "(无文字内容)"),
+    was_deleted: true,
+    edited_timestamp: "invalid_timestamp",
+  });
+  event.type = "MESSAGE_UPDATE";
+  event.channelId = old.channel_id || channelId;
+  event.optimistic = false;
+  event.sendMessageOptions = {};
 }
 
 function ArchiveSettings() {
@@ -174,7 +189,7 @@ export function onLoad() {
       console.error("[AntiRecall] archive event error", e);
     }
   });
-  try { showToast("AntiRecall v2 已启动：仅归档编辑和撤回"); } catch (e) {}
+  try { showToast("AntiRecall v2.1 已启动：撤回消息保留在频道内"); } catch (e) {}
 }
 
 export function onUnload() {
