@@ -1,6 +1,6 @@
 {
   "name": "QuickFrom",
-  "description": "v1.1 可启动：长按消息搜发言 / 双击头像（自带结果页）",
+  "description": "v1.2 长按消息 → 搜索此人发言 (from/author_id)",
   "authors": [
     {
       "name": "benchu985",
@@ -9,6 +9,6 @@
   ],
   "main": "src/index.ts",
   "vendetta": {
-    "icon": "ic_search"
+    "icon": "ic_search_24px"
   }
 }

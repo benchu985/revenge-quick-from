@@ -1,113 +1,59 @@
-# QuickFrom
+# QuickFrom v1.2
 
-Revenge / Vendetta 插件：双击头像快速搜索对方在服务器中的发言（`from:`）。
+Revenge / Vendetta 插件：长按消息 → **搜索此人发言**（`author_id` 搜本服消息，自带结果页）。
 
-## 安装（一条链接）
+## 安装
 
-在 **Revenge → Plugins → ＋ / Install plugin** 粘贴：
-
-```text
-https://benchu985.github.io/revenge-quick-from/QuickFrom
-```
-
-装完后重启或重新加载插件，确认 **QuickFrom** 已启用。
-
-> 若 GitHub Pages 还没生效（新仓库约等 1 分钟），可先用下方「本地安装」。
-
----
-
-## 怎么用
-
-### 1. 双击头像（主功能）
-
-1. 打开任意**服务器频道**（要有搜索权限）
-2. 找到对方的消息
-3. **快速双击**对方头像（间隔约 0.35 秒内点两下）
-4. 自动打开搜索，查询类似：
+**务必删掉旧版再装。** 用带 commit 的链接，避免缓存：
 
 ```text
-from:用户名
+https://cdn.jsdelivr.net/gh/benchu985/revenge-quick-from@main/QuickFrom/
 ```
 
-就能看到此人在本服的发言。
+注意 URL **末尾要有 `/`**（Revenge 会拼 `manifest.json`）。
 
-单点头像仍是打开资料；只有双击才搜索。
+装好后描述应为：`v1.2 长按消息 → 搜索此人发言`
 
-### 2. 长按消息
+点启动应 Toast：`QuickFrom v1.2 已启动`
 
-1. 长按对方的一条消息
-2. 菜单里点 **「搜索此人发言」**
-3. 效果同上，填入 `from:`
+## 用法
 
-### 3. 资料页菜单
+1. 进**服务器**频道（私信没有 guild 搜索）
+2. **长按**对方一条消息
+3. 点 **「搜索此人发言」**
+4. 结果列表里点某条可跳转
 
-在用户资料相关 ActionSheet 里也会有 **「搜索此人发言」**（可在设置里关）。
+双击头像：若 hook 到 `openUserProfileModal`，双击会搜、单击延迟开资料。
 
-### 4. 插件设置
+## 开发注意（Revenge 加载器）
 
-Revenge → Plugins → QuickFrom → 设置：
+源码见 [plugins.ts](https://github.com/revenge-mod/revenge/blob/dev/src/core/vendetta/plugins.ts)：
 
-| 选项 | 说明 |
-|------|------|
-| 双击头像搜索 | 总开关，默认开 |
-| 消息长按菜单 | 默认开 |
-| 资料页菜单 | 默认开 |
-| 优先用用户 ID | `from:123…`，用户名不准时打开 |
-| 限定当前频道 | 追加 `in:频道ID` |
-| 双击间隔 | 默认 350ms |
-| 预览查询串 | 用自己的号测生成的 `from:` |
+```js
+const pluginString = `vendetta=>{return ${plugin.js}}`;
+const raw = eval(pluginString)(vendettaForPlugins);
+const ret = typeof raw === "function" ? raw() : raw;
+pluginRet = ret?.default ?? ret ?? {};
+pluginRet.onLoad?.();
+```
 
-### 5. 若没自动打开搜索
+因此：
 
-会把 `from:xxx` **复制到剪贴板**，并 Toast 提示。  
-手动点频道右上角 🔍 搜索 → 粘贴即可。
+1. 产物必须是**表达式**，通常是匿名 IIFE：`(function(...){...; return exports})(vendetta.metro, ...)`
+2. **不要** `var PluginName = function...`（eval 得到 undefined）
+3. 导出 `onLoad` / `onUnload`（`settings` 可选）
+4. `manifest.hash` = 对 `index.js` 的 sha256
+5. `manifest.main` = `index.js`
+6. 安装 id/URL 以 `/` 结尾
+7. `onLoad` 抛错会被 loader catch 并 **自动 unload + enabled=false**（表现为点启动没反应）
+8. top-level 不要对可能为 null 的 `findByProps` 结果解构
+9. 尽量 es2018，少用过新语法
 
----
-
-## 本地安装（调试）
+## 编译
 
 ```bash
-cd ~/revenge-quick-from
 npm install --legacy-peer-deps
 npm run build
-
-cd dist
-npx --yes http-server -p 8787 --cors
+# dist/QuickFrom → 同步到仓库根 QuickFrom/ 供 Pages
+cp -f dist/QuickFrom/* QuickFrom/
 ```
-
-Revenge 安装：
-
-```text
-http://127.0.0.1:8787/QuickFrom
-```
-
-手机连电脑时把 IP 换成电脑局域网地址。
-
----
-
-## 自己编译 / 改代码
-
-```text
-plugins/QuickFrom/src/
-  index.ts                 # 入口
-  Settings.ts              # 设置页
-  lib/search.ts            # from: 拼装 + 打开搜索
-  patches/avatarDoubleTap.ts
-  patches/messageSheet.ts
-  patches/profileSheet.ts
-```
-
-```bash
-npm run build
-# 产物: dist/QuickFrom/{index.js,manifest.json}
-```
-
-推送到 GitHub 后，`dist/QuickFrom` 会通过 GitHub Pages 提供安装链接。
-
----
-
-## 注意
-
-- 必须在**有搜索权限**的服务器里用
-- 修改 Discord 客户端可能违反 ToS，风险自担
-- Discord 大更新后若双击失效，仍可用「长按消息 → 搜索此人发言」；搜不到模块时会走剪贴板兜底

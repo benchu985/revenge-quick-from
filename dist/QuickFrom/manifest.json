@@ -1,1 +1,1 @@
-{"name":"QuickFrom","description":"v1.1 可启动：长按消息搜发言 / 双击头像（自带结果页）","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search"},"hash":"26592bbfe84aacc612efe268014f41906f13a318456a53708931e72f27b8a4f6"}
+{"name":"QuickFrom","description":"v1.2 长按消息 → 搜索此人发言 (from/author_id)","authors":[{"name":"benchu985","id":"0"}],"main":"index.js","vendetta":{"icon":"ic_search_24px"},"hash":"dc623327168c87e0b14ae6558dd58c7c22c1582705d5b607affb0ca88227a3ac"}
