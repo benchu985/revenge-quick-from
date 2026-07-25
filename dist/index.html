@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QuickFrom — Revenge Plugin</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    code, pre { background: #f4f4f5; padding: .2em .4em; border-radius: 4px; }
+    pre { padding: 1rem; overflow: auto; }
+    a.btn { display: inline-block; background: #5865F2; color: #fff; padding: .6rem 1rem; border-radius: 8px; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>QuickFrom</h1>
+  <p>双击头像 → 快速 <code>from:</code> 搜索对方发言（Revenge 插件）</p>
+  <p><strong>安装 URL：</strong></p>
+  <pre id="url"></pre>
+  <p><a class="btn" id="copy" href="#">复制安装链接</a></p>
+  <ol>
+    <li>Revenge → Plugins → 安装插件</li>
+    <li>粘贴上面的链接</li>
+    <li>启用后，在服务器频道<strong>双击</strong>对方头像</li>
+  </ol>
+  <p><a href="https://github.com/benchu985/revenge-quick-from">源码 GitHub</a></p>
+  <script>
+    const u = location.origin + location.pathname.replace(/\/?$/, '/') + 'QuickFrom';
+    document.getElementById('url').textContent = u.replace(/\/QuickFrom$/, '/QuickFrom').replace(/index\.html.*/, '') ;
+    // normalize
+    const install = new URL('QuickFrom', location.href.replace(/index\.html.*/, '')).href.replace(/\/$/, '');
+    document.getElementById('url').textContent = install;
+    document.getElementById('copy').onclick = async (e) => {
+      e.preventDefault();
+      await navigator.clipboard.writeText(install);
+      alert('已复制: ' + install);
+    };
+  </script>
+</body>
+</html>
